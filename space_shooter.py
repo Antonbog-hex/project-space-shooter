@@ -9,17 +9,22 @@ pygame.init()
     
 class PhysicsObject(pygame.sprite.Sprite):
     #general object that causes and may be subject to gravity
-    def __init__(self, pos, image_path,vel = 0, force = 0, mass = 20, moving = True):
+    def __init__(self, pos, image,vel = 0, force = 0, mass = 20, moving = True, hitbox_radius = 20):
         super().__init__()
         self.pos = pygame.math.Vector2(pos)
         self.vel = pygame.math.Vector2(vel)
         self.force = pygame.math.Vector2(force)
         self.mass = mass
         self.is_moving = moving
-
-        self.base_image = pygame.image.load(image_path).convert_alpha()
+        
+        
+        if type(image) == str:
+             self.base_image = pygame.image.load(image).convert_alpha()
+        else:
+            self.base_image = image
         self.image = self.base_image
         self.rect = self.image.get_rect(center=screen_rect.center)
+        self.hitbox_radius = hitbox_radius or min(self.rect.x,self.rect.y)
 
     @property
     def get_frame_pos(self):
@@ -35,7 +40,12 @@ class PhysicsObject(pygame.sprite.Sprite):
        softened_dist = (diff.magnitude_squared() + epsilon**2) ** 0.5
         
        f = grav_cte * self.mass * other.mass * diff / softened_dist**3
+       if self.check_collision(other):
+           normal = (self.pos - other.pos).normalize()
+           f = f - f.dot(normal) * normal
+       
        self.force += f
+       
 
     def physics_sim(self):
         timestep = 1 / fps
@@ -51,24 +61,71 @@ class PhysicsObject(pygame.sprite.Sprite):
             self.grav_add(target)
             
             
+            
     def update(self,reset_force = True):
         if self.is_moving:
             if reset_force: self.force.xy = (0, 0)
             self.update_forces(active_physicsobjects)
             self.physics_sim()
-
+    
+    def check_collision(self,other):
+        if (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius) ** 2:
+            return True
+        return False
+    def elastic_collision(self, other):
+        
+        if other.pos == self.pos:
+            return
+        # Normal vector along collision axis
+        relative = (other.pos - self.pos)
+        normal = relative.normalize()
+        overlap = relative.magnitude() - self.hitbox_radius - other.hitbox_radius
+    
+        # Relative velocity along normal
+        rel_vel = self.vel - other.vel
+        vel_along_normal = rel_vel.dot(normal)
+        
+        # Don't resolve if objects are moving apart
+        if vel_along_normal < 0:
+            return
+        
+        # Elastic impulse scalar
+        impulse = (2 * vel_along_normal) / (self.mass + other.mass)
+        
+        # Apply impulse
+        self.vel -= impulse * other.mass * normal
+        self.pos += normal*0.51*overlap
+        if other.is_moving:
+            other.vel += impulse * self.mass * normal
+            other.pos -= normal*0.51*overlap
+        print(f'test {rel_vel}')
 class Planet(PhysicsObject):
-    def __init__(self, pos, vel, style,mass, ismoving):
-        image_path = Planet.get_image(style)
-        super().__init__(pos,image_path,mass = mass,moving= ismoving)
-    def get_image(style):
+    def __init__(self, pos, vel, style,density, size = 1 ,ismoving = False):
+        image = Planet.get_image(style,size)
+        mass = 2500*density * size**2
+        super().__init__(pos,image,vel=vel,mass = mass,moving= ismoving,hitbox_radius=size*255)
+    def get_image(style,size):
         if style == 'icy':
             i = random.randint(0, 4)
             
-            return f'graphics/planets/Ice/{i}.png'
+            path = f'graphics/planets/Ice/{i}.png'
         else:
             raise ValueError(f'style:{style} is not supported')
-
+        image = pygame.image.load(path).convert_alpha()
+        image = pygame.transform.rotozoom(image, 0, size)
+        return image
+    
+    def resolve_collisions(self):
+        for sprite in active_physicsobjects:
+            if sprite is not self and self.check_collision(sprite):
+                if isinstance(sprite, Planet):
+                    self.elastic_collision(sprite)
+                    
+        
+    def update(self):
+        super().update()
+        if self.is_moving:
+            self.resolve_collisions()
 class Camera():
     #handles drawing and free scrolling screen
     def __init__(self,screen):
@@ -115,23 +172,35 @@ class Camera():
                 y += bg_w
             x += bg_h
         
-        
-        
+    def debug_draw(self,group):    
+        for sprite in group:
+            if isinstance(sprite, Player) and debug_player:
+                
+                pos = sprite.pos
+                pos = pos - self.pos + self.offset
+                f = sprite.force
+                a = f / sprite.mass
+                pygame.draw.line(screen, 'red', pos, pos+a)
+                v = sprite.vel
+                pygame.draw.line(screen, 'orange', pos, pos+v)
+                pygame.draw.circle(screen, 'blue', pos, sprite.hitbox_radius,width = 1)
+            if isinstance(sprite, Planet) and debug_planet:
+                
+                pos = sprite.pos
+                pos = pos - self.pos + self.offset
+                f = sprite.force
+                a = f / sprite.mass
+                pygame.draw.line(screen, 'red', pos, pos+a)
+                v = sprite.vel
+                pygame.draw.line(screen, 'orange', pos, pos+v)
+                pygame.draw.circle(screen, 'green', pos, sprite.hitbox_radius,width = 1)
     def draw(self,group):
         for sprite in group:
             
             
             
             
-            if isinstance(sprite, Player) and debug:
-                #this is debug for velocity and force vectors on player
-                pos = pygame.math.Vector2(sprite.rect.centerx,sprite.rect.centery)
-                pos = pos - self.pos + self.offset
-                f = sprite.force
-                pygame.draw.line(screen, 'red', pos, pos+f)
-                v = sprite.vel
-                pygame.draw.line(screen, 'orange', pos, pos+v)
-                pygame.draw.circle(screen, 'blue', self.offset, 5)
+            
            
             pos = sprite.get_frame_pos - self.pos + self.offset
             self.screen.blit(sprite.image,pos)
@@ -141,10 +210,11 @@ class Camera():
 
 class Player(PhysicsObject):
     def __init__(self, pos, vel, force, angle):
-        super().__init__(pos, 'graphics/player/spaceship1.png',vel, force,moving = True)
+        super().__init__(pos, 'graphics/player/spaceship1.png',vel, force,hitbox_radius = 12,moving = True)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.2)
         self.image = self.base_image
         self.rect = self.image.get_rect(center=screen_rect.center)
+
 
         self.angle = 0
         self.angle_moment = 0
@@ -181,13 +251,19 @@ class Player(PhysicsObject):
         self.angle_moment *= 0.98
         if self.angle_moment > 0: self.angle_moment -= .2
         if self.angle_moment < 0: self.angle_moment += .2
-
+    def collision_check(self,physicsobject_iterable):
+        for sprite in physicsobject_iterable:
+            
+            if self.check_collision(sprite):
+                if isinstance(sprite, Planet):
+                    self.elastic_collision(sprite)
     def update(self):
         #general update, force reset order is necessary for input
         self.force.xy = (0,0)
         self.input_check()
         self.angle_update()
         super().update(reset_force=False)
+        self.collision_check(active_physicsobjects)
         self.image = pygame.transform.rotozoom(self.base_image, self.angle, 1)
         
         
@@ -198,18 +274,25 @@ class Player(PhysicsObject):
 def simpel_planet_spawn(player):
     #temperorary helper for planet tests
     pos = player.pos + pygame.Vector2(random.uniform(400, 800),random.uniform(400, 800))
-    mass = random.uniform(6200, 10000)
+    vel = pygame.Vector2(random.uniform(-200, 200),random.uniform(-200, 200))
+    density = 1
     
-    active_physicsobjects.add(Planet(pos,0,'icy',mass,False))
+    active_physicsobjects.add(Planet(pos,vel,'icy',density,size=random.uniform(0.2,2),ismoving = True))
             
 
 #%% main stuff
+info = pygame.display.Info()
+width = int(info.current_w * 0.9)   # 90% of screen width
+height = int(info.current_h * 0.9)  # 90% of screen height
 
-screen = pygame.display.set_mode((0,0),pygame.FULLSCREEN)
+screen = pygame.display.set_mode((width, height))
+
 screen_rect = screen.get_rect()
 
 
-
+debug = True
+debug_player = True
+debug_planet = True
 
 def main():
     global fps, debug, grav_cte,active_physicsobjects
@@ -219,14 +302,18 @@ def main():
     camera = Camera(screen)
     clock = pygame.time.Clock()
     fps = 60
-    grav_cte = 5000
+    grav_cte = 4500
     active_physicsobjects = pygame.sprite.Group()
-    active_physicsobjects.add(player)
-    debug = False
+    
+    
+    
+    active_physicsobjects.add(Planet((300,0),(0,0),'icy',1,size=1.5,ismoving = False))
+    active_physicsobjects.add(Planet((1000,0),(0,200),'icy',1,size=0.2,ismoving = True))
     
     
     while True:
-        
+        if debug:
+            pass
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
@@ -238,13 +325,20 @@ def main():
        
         
        
-        player.update()
+        player_group.update()
+        active_physicsobjects.update()
         camera.track(player_group)
         camera.background_draw()
         
-        camera.draw(active_physicsobjects)
         
-
+        
+        camera.draw(active_physicsobjects)
+        camera.draw(player_group)
+        
+        if debug:
+            camera.debug_draw(player_group)
+            camera.debug_draw(active_physicsobjects)
+        
         pygame.display.update()
         clock.tick(fps)
 
