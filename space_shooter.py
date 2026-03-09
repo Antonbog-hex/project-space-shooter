@@ -72,7 +72,7 @@ class PhysicsObject(pygame.sprite.Sprite):
         if (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius) ** 2:
             return True
         return False
-    def elastic_collision(self, other):
+    def elastic_collision(self, other,energy_dis = 1):
         
         if other.pos == self.pos:
             return
@@ -91,14 +91,14 @@ class PhysicsObject(pygame.sprite.Sprite):
         
         # Elastic impulse scalar
         impulse = (2 * vel_along_normal) / (self.mass + other.mass)
-        
+        impulse = impulse * energy_dis
         # Apply impulse
         self.vel -= impulse * other.mass * normal
         self.pos += normal*0.51*overlap
         if other.is_moving:
             other.vel += impulse * self.mass * normal
             other.pos -= normal*0.51*overlap
-        print(f'test {rel_vel}')
+        
 class Planet(PhysicsObject):
     def __init__(self, pos, vel, style,density, size = 1 ,ismoving = False):
         image = Planet.get_image(style,size)
@@ -119,7 +119,7 @@ class Planet(PhysicsObject):
         for sprite in active_physicsobjects:
             if sprite is not self and self.check_collision(sprite):
                 if isinstance(sprite, Planet):
-                    self.elastic_collision(sprite)
+                    self.elastic_collision(sprite,energy_dis= 0.9)
                     
         
     def update(self):
@@ -130,11 +130,12 @@ class Camera():
     #handles drawing and free scrolling screen
     def __init__(self,screen):
         self.truescreen = screen
-        self.scaler = self.truescreen.get_width()/2500
-        self.screen = pygame.Surface((2500,self.truescreen.get_height()/self.scaler))
+        self.scaler = self.truescreen.get_width()/true_width
+        self.screen = pygame.Surface((true_width,self.truescreen.get_height()/self.scaler))
         self.screen_height = self.screen.get_height()
         self.screen_width = self.screen.get_width()
         self.pos = pygame.math.Vector2(0,0)
+        
         
         self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)
         self.safe_dis = (self.screen_height**2 + self.screen_width**2 ) / 20
@@ -153,7 +154,20 @@ class Camera():
         offset.x = pygame.math.clamp(offset.x, - max_offset.x, max_offset.x)
         offset.y = pygame.math.clamp(offset.y, - max_offset.y, max_offset.y)
         
-        self.pos = target.pos + offset
+           # Where we want the camera to be
+        desired_pos = target.pos + offset
+        
+        # Smooth lerp toward desired position
+        LERP_SPEED = 0.08  # 0.0 = no movement, 1.0 = instant snap
+        
+        delta = desired_pos - self.pos
+        
+        # Soft dead zone — scale down delta when close, don't hard-cut it
+        dist = delta.magnitude()
+        if dist > 0:
+            # Ease out: slow down as we approach target
+            ease_factor = min(dist / 200, 1.0)  # 200 = full-speed radius
+            self.pos += delta * LERP_SPEED * ease_factor
     def background_draw(self):
         #tiles background 
         
@@ -207,6 +221,7 @@ class Camera():
             pos = sprite.get_frame_pos - self.pos + self.offset
             self.screen.blit(sprite.image,pos)
     def finalise(self):
+        
         self.truescreen.blit(pygame.transform.rotozoom(self.screen, 0, self.scaler),(0,0))
     
                 
@@ -214,7 +229,7 @@ class Camera():
 
 class Player(PhysicsObject):
     def __init__(self, pos, vel, force, angle):
-        super().__init__(pos, 'graphics/player/spaceship1.png',vel, force,hitbox_radius = 12,moving = True)
+        super().__init__(pos, 'graphics/player/spaceship1.png',vel, force,mass=100,hitbox_radius = 12,moving = True)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.2)
         self.image = self.base_image
         self.rect = self.image.get_rect(center=screen_rect.center)
@@ -227,7 +242,7 @@ class Player(PhysicsObject):
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP] or keys[pygame.K_w]:
             f = pygame.math.Vector2()
-            f.from_polar((3000, -self.angle))
+            f.from_polar((7000, -self.angle))
             
             if self.vel.dot(f) > 0:
                 vel_norm = self.vel.normalize()
@@ -235,7 +250,7 @@ class Player(PhysicsObject):
                 f_perp = f - f_parallel                        # component perpendicular to velocity
                 
                 speed = self.vel.magnitude()
-                dampen = 1 / (1 + speed * 0.005)
+                dampen = 1 / (1 + speed * 0.003)
                 self.force += f_parallel * dampen + f_perp     # only dampen parallel part
             else:
                 self.force += f
@@ -260,7 +275,7 @@ class Player(PhysicsObject):
             
             if self.check_collision(sprite):
                 if isinstance(sprite, Planet):
-                    self.elastic_collision(sprite)
+                    self.elastic_collision(sprite,energy_dis= 0.9)
     def update(self):
         #general update, force reset order is necessary for input
         self.force.xy = (0,0)
@@ -278,17 +293,17 @@ class Player(PhysicsObject):
 def simpel_planet_spawn(player):
     #temperorary helper for planet tests
     pos = player.pos + pygame.Vector2(random.uniform(400, 800),random.uniform(400, 800))
-    vel = pygame.Vector2(random.uniform(-200, 200),random.uniform(-200, 200))
-    density = 1
+    vel = pygame.Vector2(random.uniform(-500, 500),random.uniform(-500, 500))
+    density = 2.5
     
-    active_physicsobjects.add(Planet(pos,vel,'icy',density,size=random.uniform(0.2,2),ismoving = True))
+    active_physicsobjects.add(Planet(pos,vel,'icy',density,size=random.uniform(0.1,1.5),ismoving = True))
             
 
 #%% main stuff
 info = pygame.display.Info()
 width = int(info.current_w * 0.9)   # 90% of screen width
 height = int(info.current_h * 0.9)  # 90% of screen height
-
+true_width = 4000
 screen = pygame.display.set_mode((width, height))
 
 screen_rect = screen.get_rect()
@@ -299,20 +314,21 @@ debug_player = True
 debug_planet = True
 
 def main():
-    global fps, debug, grav_cte,active_physicsobjects
+    global fps, debug, grav_cte,active_physicsobjects 
     player_group = pygame.sprite.GroupSingle()
     player = Player((0,0), (0,0), (0,0), (0,1))
     player_group.add(player)
     camera = Camera(screen)
     clock = pygame.time.Clock()
     fps = 60
-    grav_cte = 4500
+    grav_cte = 6000
+    
     active_physicsobjects = pygame.sprite.Group()
     
     
     
-    active_physicsobjects.add(Planet((300,0),(0,0),'icy',1,size=1.5,ismoving = False))
-    active_physicsobjects.add(Planet((1000,0),(0,200),'icy',1,size=0.2,ismoving = True))
+    active_physicsobjects.add(Planet((1500,0),(0,0),'icy',2.5,size=1.5,ismoving = False))
+    active_physicsobjects.add(Planet((2200,0),(0,400),'icy',1.4,size=0.2,ismoving = True))
     
     
     while True:
@@ -338,15 +354,15 @@ def main():
         
         camera.draw(active_physicsobjects)
         camera.draw(player_group)
-        camera.finalise()
+        
         
         if debug:
             camera.debug_draw(player_group)
             camera.debug_draw(active_physicsobjects)
-        
+        camera.finalise()
         pygame.display.update()
         clock.tick(fps)
-
+        print(f'fps:{round(clock.get_fps())}', f'current planets: {len(active_physicsobjects)}')
 try:
     main()
 except:
