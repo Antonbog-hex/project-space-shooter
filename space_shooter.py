@@ -129,9 +129,11 @@ class Planet(PhysicsObject):
 class Camera():
     #handles drawing and free scrolling screen
     def __init__(self,screen):
-        self.screen = screen
-        self.screen_height = screen.get_height()
-        self.screen_width = screen.get_width()
+        self.truescreen = screen
+        self.scaler = self.truescreen.get_width()/2500
+        self.screen = pygame.Surface((2500,self.truescreen.get_height()/self.scaler))
+        self.screen_height = self.screen.get_height()
+        self.screen_width = self.screen.get_width()
         self.pos = pygame.math.Vector2(0,0)
         
         self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)
@@ -180,20 +182,20 @@ class Camera():
                 pos = pos - self.pos + self.offset
                 f = sprite.force
                 a = f / sprite.mass
-                pygame.draw.line(screen, 'red', pos, pos+a)
+                pygame.draw.line(self.screen, 'red', pos, pos+a)
                 v = sprite.vel
-                pygame.draw.line(screen, 'orange', pos, pos+v)
-                pygame.draw.circle(screen, 'blue', pos, sprite.hitbox_radius,width = 1)
+                pygame.draw.line(self.screen, 'orange', pos, pos+v)
+                pygame.draw.circle(self.screen, 'blue', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, Planet) and debug_planet:
                 
                 pos = sprite.pos
                 pos = pos - self.pos + self.offset
                 f = sprite.force
                 a = f / sprite.mass
-                pygame.draw.line(screen, 'red', pos, pos+a)
+                pygame.draw.line(self.screen, 'red', pos, pos+a)
                 v = sprite.vel
-                pygame.draw.line(screen, 'orange', pos, pos+v)
-                pygame.draw.circle(screen, 'green', pos, sprite.hitbox_radius,width = 1)
+                pygame.draw.line(self.screen, 'orange', pos, pos+v)
+                pygame.draw.circle(self.screen, 'green', pos, sprite.hitbox_radius,width = 1)
     def draw(self,group):
         for sprite in group:
             
@@ -204,6 +206,8 @@ class Camera():
            
             pos = sprite.get_frame_pos - self.pos + self.offset
             self.screen.blit(sprite.image,pos)
+    def finalise(self):
+        self.truescreen.blit(pygame.transform.rotozoom(self.screen, 0, self.scaler),(0,0))
     
                 
         
@@ -334,6 +338,7 @@ def main():
         
         camera.draw(active_physicsobjects)
         camera.draw(player_group)
+        camera.finalise()
         
         if debug:
             camera.debug_draw(player_group)
