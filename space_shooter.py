@@ -244,7 +244,7 @@ class Player(PhysicsObject):
             f = pygame.math.Vector2()
             f.from_polar((7000, -self.angle))
             
-            if self.vel.dot(f) > 0:
+            if self.vel.dot(f) > 0:                            # check if  the force attempts increase in vel
                 vel_norm = self.vel.normalize()
                 f_parallel = vel_norm * f.dot(vel_norm)        # component along velocity
                 f_perp = f - f_parallel                        # component perpendicular to velocity
