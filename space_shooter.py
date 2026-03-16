@@ -303,7 +303,7 @@ def simpel_planet_spawn(player):
 info = pygame.display.Info()
 width = int(info.current_w * 0.9)   # 90% of screen width
 height = int(info.current_h * 0.9)  # 90% of screen height
-true_width = 4000
+true_width = 1500
 screen = pygame.display.set_mode((width, height))
 
 screen_rect = screen.get_rect()
@@ -316,7 +316,7 @@ debug_planet = True
 def main():
     global fps, debug, grav_cte,active_physicsobjects 
     player_group = pygame.sprite.GroupSingle()
-    player = Player((0,0), (0,0), (0,0), (0,1))
+    player = Player((0,0), (0,200), (0,0), (0,1))
     player_group.add(player)
     camera = Camera(screen)
     clock = pygame.time.Clock()
@@ -327,7 +327,7 @@ def main():
     
     
     
-    active_physicsobjects.add(Planet((1500,0),(0,0),'icy',2.5,size=1.5,ismoving = False))
+    active_physicsobjects.add(Planet((1500,0),(0,0),'icy',2.5,size=1.2,ismoving = False))
     active_physicsobjects.add(Planet((2200,0),(0,400),'icy',1.4,size=0.2,ismoving = True))
     
     
