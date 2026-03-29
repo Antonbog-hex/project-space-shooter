@@ -6,7 +6,51 @@ from sys import exit
 
 pygame.init()
 #%% classes
+class  BasicObject():
+    def __init__(self,pos:pygame.Vector2):
+        self.pos = pygame.math.Vector2(pos)
 
+class VisualObject(BasicObject):
+    def __init__(self,image: pygame.Surface, **kwargs):
+        super().__init__(**kwargs)
+        self.image : pygame.Surface = image
+    def get_frame_pos(self) -> pygame.Vector2:
+        sprite_offset = pygame.math.Vector2(self.image.get_width() // 2, self.image.get_height() // 2)
+        return self.pos - sprite_offset
+
+class MovingObject(BasicObject):
+    def __init__(self,vel = 0,acc = 0,**kwargs):
+        super().__init__(**kwargs)
+        self.vel = pygame.Vector2(vel)
+        self.acc = pygame.Vector2(acc)
+    def update(self):
+        # timestep is a global variable linked to framerate
+        self.pos += self.vel * timestep + 0.5 * self.acc * timestep ** 2
+        self.vel += self.acc
+class GravityObject(BasicObject):
+    def __init__(self,mass:int = 200,**kwargs):
+        super().__init__(**kwargs)
+        if isinstance(self, MovingObject):
+            self.force = pygame.Vector2(0)
+        
+    def grav_add(self, other: "GravityObject"):
+        if self.pos == other.pos or not hasattr(self, 'force'):
+            return
+        diff = other.pos - self.pos
+        diff_mag_sq = diff.magnitude_squared()
+        if diff_mag_sq > 6000 ** 2:
+            return
+        
+        epsilon = 50  # tune this - higher = softer gravity at close range, unrealistic but improves controlabilit
+        softened_dist_sq = diff.magnitude_squared() + epsilon**2
+        f = grav_cte * self.mass * other.mass * diff / softened_dist_sq**1.5
+        self.force += f
+    def update(self):
+        if isinstance(self, MovingObject):
+            #active_gravityobjects is a global
+            for object in active_gravityobjects:
+                self.grav_add(object)
+            
 class PhysicsObject():
     #general object that causes and may be subject to gravity
     def __init__(self, pos, image,vel = 0, force = 0, mass = 20, moving = True, hitbox_radius = 20):
@@ -47,13 +91,13 @@ class PhysicsObject():
        
 
     def physics_sim(self):
-        timestep = 1 / fps
+        
         self.pos += self.vel * timestep + 0.5 * self.force / self.mass * timestep**2
         self.vel += self.force / self.mass * timestep
         
        
         
-        self.rect.center = self.pos
+      # self.rect.center = self.pos
         
     def update_forces(self,physicsobject_iterable):
         for target in physicsobject_iterable:
@@ -98,7 +142,7 @@ class PhysicsObject():
             other.vel += impulse * self.mass * normal
             other.pos -= normal*0.51*overlap
 
-class ActivePhysicsObjects(list):
+class ActiveObjects(list):
     #list to keep all physicsobjects in
     def __init__(self):
         super().__init__()
@@ -379,7 +423,8 @@ try:
     timestep = 1/fps
     grav_cte = 6000
 
-    active_physicsobjects = ActivePhysicsObjects()
+    active_physicsobjects = ActiveObjects()
+    active_gravityobjects = ActiveObjects()
     main()
 except:
     traceback.print_exc()
