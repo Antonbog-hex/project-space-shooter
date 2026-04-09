@@ -31,10 +31,14 @@ class MovingObject(BasicObject):
         super().__init__(**kwargs)
         self.vel = pygame.Vector2(vel)
         self.acc = pygame.Vector2(acc)
+    def next_pos(self,steps = 1):
+        return self.pos + self.vel * timestep * steps + 0.5 * self.acc * (timestep * steps) ** 2
+    def next_vel(self,steps = 1):
+        return self.vel + self.acc * timestep*steps
     def update(self):
         # timestep is a global variable linked to framerate
-        self.pos += self.vel * timestep + 0.5 * self.acc * timestep ** 2
-        self.vel += self.acc * timestep
+        self.pos = self.next_pos()
+        self.vel = self.next_vel()
         super().update()
 class GravityObject(BasicObject):
     def __init__(self,mass:int = 200,**kwargs):
@@ -42,26 +46,26 @@ class GravityObject(BasicObject):
         if isinstance(self, MovingObject):
             self.force = pygame.Vector2(0)
         self.mass = mass
-    def grav_add(self, other: "GravityObject"):
+    def get_grav(self, other: "GravityObject"):
         if self.pos == other.pos or not hasattr(self, 'force'):
-            return
+            return 
         diff = other.pos - self.pos
         diff_mag_sq = diff.magnitude_squared()
         if diff_mag_sq > 6000 ** 2:
             return
+        f = grav_cte  * self.mass * other.mass * diff / diff_mag_sq ** 1.5 # standard gravity
+        f += grav_cte * 0.01 * self.mass * other.mass * diff / diff_mag_sq ** 1.2 # second weaker term that drops more gradually, makes orbiting more stable
+        return f
         
-        epsilon = 50  # tune this - higher = softer gravity at close range, unrealistic but improves controlabilit
-        softened_dist_sq = diff.magnitude_squared() + epsilon**2
-        f = grav_cte * self.mass * other.mass * diff / softened_dist_sq**1.5
-        self.force += f
+    def get_total_gravity(self):
+        force = pygame.Vector2(0)
+        for object in active_object: #active_object is a global
+            force += self.get_grav(object) or (0,0)
+        return force
     def pre_update(self):
         if isinstance(self, MovingObject):
-            #active_object is a global
-            self.force = pygame.Vector2(0)
-            for object in active_object:
-                self.grav_add(object)
-            if isinstance(self, MovingObject):
-                self.acc = self.force / self.mass
+            self.force = self.get_total_gravity()
+            self.acc = self.force / self.mass
         super().pre_update()     
 class RotatingObject(BasicObject):
     def __init__(self,angle,angle_moment = 0,**kwargs):
@@ -88,9 +92,9 @@ class CircularHitbox(Hitbox):
     def hit(self,other)-> bool:
         if isinstance(other, CircularHitbox):
             return (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius)**2     
-class PhysicsObject(GravityObject,MovingObject,VisualObject,CircularHitbox):
-    def __init__(self, pos, image,vel = 0, force = 0, mass = 20, hitbox_radius = 20, **kwargs):
-        super().__init__(pos=pos, image=image,vel=vel, mass=mass, radius = hitbox_radius, **kwargs)
+class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
+    def __init__(self, pos,vel = 0, force = 0, mass = 20, hitbox_radius = 20, **kwargs):
+        super().__init__(pos=pos,vel=vel, mass=mass, radius = hitbox_radius, **kwargs)
         
     
     def elastic_collision(self, other,energy_dis = 1):
@@ -109,7 +113,6 @@ class PhysicsObject(GravityObject,MovingObject,VisualObject,CircularHitbox):
          # Don't resolve if objects are moving apart
          if vel_along_normal < 0:
              return
-         
          # Elastic impulse scalar
          impulse = (2 * vel_along_normal) / (self.mass + other.mass)
          impulse = impulse * energy_dis
@@ -118,7 +121,7 @@ class PhysicsObject(GravityObject,MovingObject,VisualObject,CircularHitbox):
          self.pos += normal*0.51*overlap
          if isinstance(other,MovingObject):
              other.vel += impulse * self.mass * normal
-             other.pos -= normal*0.51*overlap
+             other.pos -= normal*0.51*overlap         
 class ActiveObjects(list):
     #list to keep all physicsobjects in
     def __init__(self):
@@ -130,7 +133,7 @@ class ActiveObjects(list):
             e.pre_update() # calculates without action (eg. gravity)
         for e in self:
             e.update() # the action (eg. movement)
-class Planet(PhysicsObject):
+class Planet(PhysicsObject,VisualObject):
     def __init__(self, pos, vel, style,density, size = 1):
         image = Planet.get_image(style,size)
         mass = 2500*density * size**2
@@ -144,8 +147,7 @@ class Planet(PhysicsObject):
             raise ValueError(f'style:{style} is not supported')
         image = pygame.image.load(path).convert_alpha()
         image = pygame.transform.rotozoom(image, 0, size)
-        return image
-    
+        return image   
     def resolve_collisions(self):
         for sprite in active_object:
             if id(sprite)< id(self) and self.hit(sprite):
@@ -173,13 +175,16 @@ class Camera(BasicObject):
         self.background_rect = self.background_surf.get_rect()
         self.background_pos = pygame.Vector2((0,0))
     def track(self,target):
-        offset = target.vel.copy()
-        max_offset = self.offset - (100,100)
-        offset.x = pygame.math.clamp(offset.x, - max_offset.x, max_offset.x)
-        offset.y = pygame.math.clamp(offset.y, - max_offset.y, max_offset.y)
-        
+      
            # Where we want the camera to be
-        desired_pos = target.pos + offset
+        max_dist_sq = (self.offset.y - 100)**2  # max distance from player to desired camera pos
+    
+        desired_pos = target.pos  # fallback to current pos
+        for prediction in target.position_estimation[:3]:
+            if (prediction - target.pos).magnitude_squared() < max_dist_sq:
+                desired_pos = prediction
+            else:
+                break
         
         # Smooth lerp toward desired position
         LERP_SPEED = 0.08  # 0.0 = no movement, 1.0 = instant snap
@@ -192,6 +197,7 @@ class Camera(BasicObject):
             # Ease out: slow down as we approach target
             ease_factor = min(dist / 200, 1.0)  # 200 = full-speed radius
             self.pos += delta * LERP_SPEED * ease_factor
+        
     def background_draw(self):
         #tiles background 
         
@@ -228,14 +234,17 @@ class Camera(BasicObject):
                 pygame.draw.circle(self.pre_screen, 'blue', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, Planet) and debug_planet:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
+    def player_predict_draw(self):
+        for e in player.position_estimation:
+            pygame.draw.circle(self.pre_screen, 'white', e - self.pos + self.offset , 4)
+        
     def draw(self,group):
         if not hasattr(group,'__iter__'): # catches when attempting to draw a single object
             group = [group]
         for sprite in group:
             pos = sprite.get_frame_pos() - self.pos + self.offset
             self.pre_screen.blit(sprite.image,pos)
-    def finalise(self):
-        
+    def finalise(self):   
         self.final_screen.blit(pygame.transform.rotozoom(self.pre_screen, 0, self.scaler),(0,0))
     def freecam(self):
         keys = pygame.key.get_pressed()
@@ -248,10 +257,39 @@ class Camera(BasicObject):
                 self.pos += (0,-0.05)
             if keys[pygame.K_DOWN]:
                 self.pos += (0,0.05)     
-class Player(PhysicsObject,RotatingObject):
-
+class Spaceship(PhysicsObject,RotatingObject,VisualObject):
+    def __init__(self, pos, vel, angle,image ,**kwargs):
+        super().__init__(pos = pos,image = image ,vel = vel , mass = 100, angle = angle , hitbox_radius= 15, **kwargs)
+        self.position_estimation = []
+    def pos_estimation_update(self,steps=5):
+        active_object.remove(self)
+        self.position_estimation.clear()
+        tester = PhysicsObject(pos = self.pos,vel= self.vel,force = self.force,mass=self.mass,hitbox_radius= self.hitbox_radius)
+        for i in range(steps):
+            for i in range (32):
+                tester.pre_update()
+                tester.update()
+            self.position_estimation.append(tester.pos)
+        active_object.add(self)
+            
+        
+        
+        
+            
+    def collision_check(self):
+        for sprite in active_object:
+            if self.hit(sprite):
+                if isinstance(sprite, Planet):
+                    self.elastic_collision(sprite,energy_dis= 1.1)
+                                      
+    def update(self):
+        
+        self.angle_dampen()
+        self.collision_check()
+        super().update()
+class Player(Spaceship):
     def __init__(self, pos, vel, angle):
-        super().__init__(pos = pos, image = 'graphics/player/spaceship1.png',vel = vel , mass = 100, angle = angle , hitbox_radius= 15)
+        super().__init__(pos = pos, image = 'graphics/player/spaceship1.png',vel = vel, angle = angle)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.2)
     def input_check(self):
         keys = pygame.key.get_pressed()
@@ -272,16 +310,9 @@ class Player(PhysicsObject,RotatingObject):
             self.angle_moment += 20
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             self.angle_moment += -20
-    def collision_check(self):
-        for sprite in active_object:
-            if self.hit(sprite):
-                if isinstance(sprite, Planet):
-                    self.elastic_collision(sprite,energy_dis= 1.1)
-                    self.vel:pygame.Vector2                  
     def update(self):
         if not debug_freecam: self.input_check()
-        self.angle_dampen()
-        self.collision_check()
+        self.pos_estimation_update()
         super().update()
 #%% functions
 def simpel_planet_spawn(player):
@@ -296,14 +327,17 @@ def simpel_planet_spawn(player):
 #%% main function
 
 def main():
+    active_object.add(player)
+    
     active_object.add(Planet((1500,0),(0,0),'icy',2.5,size=1.2))
-    active_object.add(Planet((2200,0),(0,250),'icy',1.4,size=0.2))
+    active_object.add(Planet((2400,0),(0,250),'icy',1.4,size=0.2))
     while True: 
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 pygame.quit()
                 exit()
+                print(player.position_estimation, '\n')
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
                     simpel_planet_spawn(player)
@@ -318,6 +352,7 @@ def main():
         camera.background_draw()
         camera.draw(active_object)
         camera.draw(player)
+        camera.player_predict_draw()
         if debug:
             camera.debug_draw(player)
             camera.debug_draw(active_object)
@@ -344,9 +379,8 @@ try:
     fps = 60
     timestep = 1/fps
     grav_cte = 6000
-
     active_object = ActiveObjects()
-    active_object.add(player)
+    
     main()
 except:
     traceback.print_exc()
