@@ -54,7 +54,8 @@ class GravityObject(BasicObject):
         if diff_mag_sq > 6000 ** 2:
             return
         f = grav_cte  * self.mass * other.mass * diff / diff_mag_sq ** 1.5 # standard gravity
-        f += grav_cte * 0.01 * self.mass * other.mass * diff / diff_mag_sq ** 1.2 # second weaker term that drops more gradually, makes orbiting more stable
+        if isinstance(self, Spaceship):
+            f += grav_cte * 0.01 * self.mass * other.mass * diff / diff_mag_sq ** 1.3 # second weaker term that drops more gradually, makes orbiting more stable
         return f
         
     def get_total_gravity(self):
@@ -141,8 +142,22 @@ class Planet(PhysicsObject,VisualObject):
     def get_image(style,size):
         if style == 'icy':
             i = random.randint(0, 4)
-            
             path = f'graphics/planets/Ice/{i}.png'
+        elif style == 'tropical':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Tropical/{i}.png'
+        elif style == 'desert':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Desert/{i}.png'
+        elif style == 'ocean':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Ocean/{i}.png'
+        elif style == 'earth':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Alpine/{i}.png'
+        elif style == 'moon':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Moons/{i}.png'
         else:
             raise ValueError(f'style:{style} is not supported')
         image = pygame.image.load(path).convert_alpha()
@@ -302,7 +317,7 @@ class Player(Spaceship):
                 a_perp = a - a_parallel                        # component perpendicular to velocity
                 
                 speed = self.vel.magnitude()
-                dampen = 1 / (1 + speed * 0.02)
+                dampen = 1 / (1 + speed * 0.01)
                 self.acc += a_parallel * dampen + a_perp # only dampen parallel part
             else:
                 self.acc += a
@@ -322,25 +337,71 @@ def simpel_planet_spawn(player):
     density = 2.5
     
     active_object.add(Planet(pos,vel,'icy',density,size=random.uniform(0.1,1.5)))
-            
+def random_planet_type():
+    return random.choice(['icy','desert','earth','ocean','tropical'])
+#%% prefabs
+all_prefabs = {}
+def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2 = None, separation=None):
+    density1 = density1 or random.uniform(1,4)
+    size1 = size1 or random.uniform(0.5,2)
+    density2 = density2 or random.uniform(1,4)
+    size2 = size2 or random.uniform(0.5,2)
+    separation = separation or random.uniform(500,2000)
+    
+    
+    
+    
+    mass1 = 2500 * density1 * size1**2
+    mass2 = 2500 * density2 * size2**2
+    
+    # center of mass
+    total_mass = mass1 + mass2
+    r1 = separation * mass2 / total_mass  # distance of body1 from CoM
+    r2 = separation * mass1 / total_mass  # distance of body2 from CoM
+    
+    # orbital velocity for circular orbit
+    v1 = (grav_cte * mass2**2 / (total_mass * separation)) ** 0.5
+    v2 = (grav_cte * mass1**2 / (total_mass * separation)) ** 0.5
+    
+    pos1 = pygame.Vector2(pos) + pygame.Vector2(-r1, 0)
+    pos2 = pygame.Vector2(pos) + pygame.Vector2(r2, 0)
+    
+    p1 = Planet(pos1, (0, -v1), random_planet_type(), density1, size=size1)
+    p2 = Planet(pos2, (0, v2), random_planet_type(), density2, size=size2)
+    
+    active_object.add(p1)
+    active_object.add(p2)
+    return p1, p2
+def prefab_moon_system(pos, moon_count=3):
+    central = Planet(pos, (0,0), random_planet_type(), 4.0, size=1.8)
+    active_object.add(central)
+    for i in range(moon_count):
+        r = 400 + i * 250
+        v = (grav_cte * central.mass / r) ** 0.5
+        angle = random.uniform(0, 360)
+        offset = pygame.Vector2(r, 0).rotate(angle)
+        vel = pygame.Vector2(v, 0).rotate(angle + 90)
+        active_object.add(Planet(pos + offset, vel, 'moon', 
+                                 random.uniform(1,2), size=random.uniform(0.1, 0.25)))
+
 
 #%% main function
 
 def main():
-    active_object.add(player)
-    
-    active_object.add(Planet((1500,0),(0,0),'icy',2.5,size=1.2))
-    active_object.add(Planet((2400,0),(0,250),'icy',1.4,size=0.2))
+    if not debug_freecam:
+        active_object.add(player)
+    prefab_binary_planet((0,4000))
+    #active_object.add(Planet((1500,0),(0,0),'icy',2.5,size=1.2))
+    #active_object.add(Planet((2400,0),(0,250),'icy',1.4,size=0.2))
     while True: 
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 pygame.quit()
                 exit()
-                print(player.position_estimation, '\n')
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
-                    simpel_planet_spawn(player)
+                    prefab_moon_system(player.pos + (4000,0))
         
         active_object.update()
         
@@ -363,16 +424,17 @@ def main():
 # try-except prevents kernel crash in case of bug, because pygame needs to quit proper 
 pygame.init()
 try:
+    random.seed(1234)
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)   # 90% of screen width
     height = int(info.current_h * 0.9)  # 90% of screen height
-    true_width = 4000 # change to alter game size
+    true_width = 8000 # change to alter game size
     screen = pygame.display.set_mode((width, height))
     screen_rect = screen.get_rect()
     debug = True
     debug_player = True
     debug_planet = True
-    debug_freecam = False
+    debug_freecam = True
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
