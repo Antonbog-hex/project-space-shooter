@@ -428,13 +428,13 @@ try:
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)   # 90% of screen width
     height = int(info.current_h * 0.9)  # 90% of screen height
-    true_width = 8000 # change to alter game size
+    true_width = 2000 # change to alter game size
     screen = pygame.display.set_mode((width, height))
     screen_rect = screen.get_rect()
     debug = True
     debug_player = True
     debug_planet = True
-    debug_freecam = True
+    debug_freecam = False
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
