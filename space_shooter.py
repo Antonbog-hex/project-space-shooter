@@ -428,15 +428,9 @@ try:
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)   # 90% of screen width
     height = int(info.current_h * 0.9)  # 90% of screen height
-<<<<<<< Updated upstream
-    true_width = 2000 # change to alter game size
-=======
-<<<<<<< HEAD
+
+
     true_width = 4000 # change to alter game size
-=======
-    true_width = 2000 # change to alter game size
->>>>>>> 0ee25ae54647e5fdde08c9e6d53c9d3e1f86da85
->>>>>>> Stashed changes
     screen = pygame.display.set_mode((width, height))
     screen_rect = screen.get_rect()
     debug = True
