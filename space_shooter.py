@@ -181,7 +181,7 @@ class Camera(BasicObject):
         super().__init__()
         self.final_screen = screen
         self.scaler = self.final_screen.get_width()/true_width
-        self.pre_screen = pygame.Surface((true_width,self.final_screen.get_height()/self.scaler))
+        self.pre_screen = pygame.Surface((true_width,int(self.final_screen.get_height()/self.scaler)))
         self.screen_height = self.pre_screen.get_height()
         self.screen_width = self.pre_screen.get_width()
         self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)
@@ -215,7 +215,7 @@ class Camera(BasicObject):
         
     def background_draw(self):
         #tiles background 
-        
+        self.pre_screen.fill((0,0,0))
         bg_w = self.background_surf.get_width()
         bg_h = self.background_surf.get_height()
         
@@ -428,7 +428,15 @@ try:
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)   # 90% of screen width
     height = int(info.current_h * 0.9)  # 90% of screen height
+<<<<<<< Updated upstream
     true_width = 2000 # change to alter game size
+=======
+<<<<<<< HEAD
+    true_width = 4000 # change to alter game size
+=======
+    true_width = 2000 # change to alter game size
+>>>>>>> 0ee25ae54647e5fdde08c9e6d53c9d3e1f86da85
+>>>>>>> Stashed changes
     screen = pygame.display.set_mode((width, height))
     screen_rect = screen.get_rect()
     debug = True
