@@ -3,105 +3,154 @@ import traceback
 import random
 from sys import exit
 
+# Klassen
 
+class BasicObject(): 
 
-#%% classes
-class BasicObject():
-    def __init__(self,pos:pygame.Vector2 = 0):
+# De meest fundamentele klasse. Elk object heeft een positie, alle andere klassen erven hiervan (direct of indirect)
+
+    def __init__(self,pos: pygame.Vector2 = 0):
         self.pos = pygame.math.Vector2(pos)
-    def update(self):
-        #these are important to keep the update()-chain from breaking
-        pass
-    def pre_update(self):
-        pass
-class VisualObject(BasicObject):
-    def __init__(self,image: pygame.Surface, **kwargs):
-        if type(image) == str:
-            image = pygame.image.load(image).convert_alpha() 
-        super().__init__(**kwargs)
-        self.image : pygame.Surface = image
-        self.base_image = self.image
     
-       
+    def update(self):
+        pass # Lege methode, zodat super().update() altijd werkt
+
+    def pre_update(self):
+        pass # idem, deze methode wordt aangeroepen voor update()
+
+class VisualObject(BasicObject):
+# Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
+
+    def __init__(self, image: pygame.Surface, **kwargs):
+            if isinstance(image, str):
+                image = pygame.image.load(image).convert_alpha()
+            super().__init__(**kwargs)
+            self.image = image
+            self.base_image = self.image  # bewaar origineel voor rotaties
+
     def get_frame_pos(self) -> pygame.Vector2:
-        sprite_offset = pygame.math.Vector2(self.image.get_width() // 2, self.image.get_height() // 2)
-        return self.pos - sprite_offset
+        offset = pygame.math.Vector2(self.image.get_width() // 2, self.image.get_height() // 2)
+        return self.pos - offset
+
 class MovingObject(BasicObject):
+    """
+    Een object dat beweegt via physics:
+      pos  = positie
+      vel  = snelheid (velocity)
+      acc  = versnelling (acceleration)
+    Bij elk frame wordt pos bijgewerkt via de bewegingsvergelijking.
+    """
+
     def __init__(self,vel = 0,acc = 0,**kwargs):
         super().__init__(**kwargs)
         self.vel = pygame.Vector2(vel)
         self.acc = pygame.Vector2(acc)
+
     def next_pos(self,steps = 1):
+        # Berekent de positie na "steps" (kinematica)
         return self.pos + self.vel * timestep * steps + 0.5 * self.acc * (timestep * steps) ** 2
+
     def next_vel(self,steps = 1):
+        # Berekent snelheid na "steps" (kinematica)
         return self.vel + self.acc * timestep*steps
+
     def update(self):
-        # timestep is a global variable linked to framerate
         self.pos = self.next_pos()
         self.vel = self.next_vel()
         super().update()
+
 class GravityObject(BasicObject):
-    def __init__(self,mass:int = 200,**kwargs):
+    # Object voor berekenen zwaartekrachten
+
+    def __init__(self, mass: int = 200, **kwargs):
         super().__init__(**kwargs)
+        self.mass = mass
         if isinstance(self, MovingObject):
             self.force = pygame.Vector2(0)
-        self.mass = mass
+
     def get_grav(self, other: "GravityObject"):
+        # Berekent de zwaartekrachtsvector
+        
         if self.pos == other.pos or not hasattr(self, 'force'):
-            return 
-        diff = other.pos - self.pos
-        diff_mag_sq = diff.magnitude_squared()
-        if diff_mag_sq > 6000 ** 2:
             return
-        f = grav_cte  * self.mass * other.mass * diff / diff_mag_sq ** 1.5 # standard gravity
+        diff = other.pos - self.pos
+        dist_sq = diff.magnitude_squared()
+        if dist_sq > 6000 ** 2:
+            return  # Te ver weg: geen invloed
+
+        # Standaard gravitatiewet: F = G * m1 * m2 / r²  (als vector)
+        f = grav_cte * self.mass * other.mass * diff / dist_sq ** 1.5
+
         if isinstance(self, Spaceship):
-            f += grav_cte * 0.01 * self.mass * other.mass * diff / diff_mag_sq ** 1.3 # second weaker term that drops more gradually, makes orbiting more stable
+            f += grav_cte * 0.01 * self.mass * other.mass * diff / dist_sq ** 1.3
         return f
         
     def get_total_gravity(self):
+        # Som van alle gravitatiekrachten van elk object
         force = pygame.Vector2(0)
         for object in active_object: #active_object is a global
             force += self.get_grav(object) or (0,0)
         return force
+
     def pre_update(self):
+        # Wordt elke frame vóór update() aangeroepen om acc bij te werken.
         if isinstance(self, MovingObject):
             self.force = self.get_total_gravity()
             self.acc = self.force / self.mass
-        super().pre_update()     
+        super().pre_update() 
+
 class RotatingObject(BasicObject):
+    # Een object dat kan draaien.
+    # angle        = huidige hoek in graden
+    # angle_moment = draaisnelheid (zoals vel maar voor rotatie)
     def __init__(self,angle,angle_moment = 0,**kwargs):
          super().__init__(**kwargs)
          self.angle = angle
          self.angle_moment = angle_moment
+
     def angle_dampen(self):
+        # Begrenst de draaisnelheid en vertraagt langzaam naar 0
         self.angle_moment = pygame.math.clamp(self.angle_moment, -150, 150)
         if self.angle_moment > 0: self.angle_moment -= 2
         if self.angle_moment < 0: self.angle_moment += 2
+
     def update(self):
         self.angle += self.angle_moment*timestep
         if isinstance(self, VisualObject): self.image = pygame.transform.rotozoom(self.base_image, self.angle, 1)
         super().update()
+
 class Hitbox(BasicObject):
+    # Basisklasse voor botsingsdetectie
     def __init__(self,**kwargs):
         super().__init__(**kwargs)
+    
     def hit(self,other: 'Hitbox') -> bool:
         pass
+
 class CircularHitbox(Hitbox):
+    # Ronde hitbox: botst als de afstand kleiner is dan de som van de radiussen
     def __init__(self,radius,**kwargs):
         super().__init__(**kwargs)
         self.hitbox_radius = radius
+
     def hit(self,other)-> bool:
         if isinstance(other, CircularHitbox):
-            return (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius)**2     
+            return (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius)**2 
+
 class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
+    # Combineert zwaartekracht + beweging + botsingsdetectie. Dit is de basis voor planeten en spaceships.
     def __init__(self, pos,vel = 0, force = 0, mass = 20, hitbox_radius = 20, **kwargs):
         super().__init__(pos=pos,vel=vel, mass=mass, radius = hitbox_radius, **kwargs)
-        
-    
+
     def elastic_collision(self, other,energy_dis = 1):
-         
+         """
+        Verwerkt een elastische botsing tussen dit object en "other".
+        energy_dis < 1 = energie gaat verloren (inelastisch)
+        energy_dis > 1 = energie wordt toegevoegd (explosief)
+         """
          if other.pos == self.pos:
              return
+         
          # Normal vector along collision axis
          relative = (other.pos - self.pos)
          normal = relative.normalize()
@@ -111,34 +160,43 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
          rel_vel = self.vel - other.vel
          vel_along_normal = rel_vel.dot(normal)
          
-         # Don't resolve if objects are moving apart
          if vel_along_normal < 0:
-             return
+             return # objects are moving apart
+        
          # Elastic impulse scalar
          impulse = (2 * vel_along_normal) / (self.mass + other.mass)
          impulse = impulse * energy_dis
+
          # Apply impulse
          self.vel -= impulse * other.mass * normal
          self.pos += normal*0.51*overlap
+
          if isinstance(other,MovingObject):
              other.vel += impulse * self.mass * normal
              other.pos -= normal*0.51*overlap         
+
 class ActiveObjects(list):
-    #list to keep all physicsobjects in
+    # Lijst van alle actieve PhysicsObjects. Roept elke frame pre_update() en update() aan op elk object.
+
     def __init__(self):
         super().__init__()
+
     def add(self,other:PhysicsObject):
         self.append(other)
+
     def update(self):
         for e in self:
             e.pre_update() # calculates without action (eg. gravity)
         for e in self:
             e.update() # the action (eg. movement)
+
 class Planet(PhysicsObject,VisualObject):
+    # Een planeet: heeft een afbeelding, massa (gebaseerd op dichtheid+grootte) en botst elastisch met andere planeten.
     def __init__(self, pos, vel, style,density, size = 1):
         image = Planet.get_image(style,size)
-        mass = 2500*density * size**2
+        mass = 2500*density * size ** 2
         super().__init__(pos = pos ,image = image,vel=vel,mass = mass,hitbox_radius=size*255)
+    
     def get_image(style,size):
         if style == 'icy':
             i = random.randint(0, 4)
@@ -162,11 +220,12 @@ class Planet(PhysicsObject,VisualObject):
             raise ValueError(f'style:{style} is not supported')
         image = pygame.image.load(path).convert_alpha()
         image = pygame.transform.rotozoom(image, 0, size)
-        return image   
+        return image
+
     def resolve_collisions(self):
+        # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
         for sprite in active_object:
             if id(sprite)< id(self) and self.hit(sprite):
-                #id prevents double resolve
                 if isinstance(sprite, Planet):
                     self.elastic_collision(sprite,energy_dis= 0.9)
                     
@@ -175,8 +234,9 @@ class Planet(PhysicsObject,VisualObject):
         super().update()
         if isinstance(self,MovingObject):
             self.resolve_collisions()
+
 class Camera(BasicObject):
-    #handles drawing and free scrolling screen
+    # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
     def __init__(self,screen):
         super().__init__()
         self.final_screen = screen
@@ -184,17 +244,20 @@ class Camera(BasicObject):
         self.pre_screen = pygame.Surface((true_width,int(self.final_screen.get_height()/self.scaler)))
         self.screen_height = self.pre_screen.get_height()
         self.screen_width = self.pre_screen.get_width()
+        
+        # Camera-offset = midden van het scherm
         self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)
-        #background
+        
+        #achtergrond
         self.background_surf = pygame.image.load('graphics/background/Starfield_05-1024x1024.png').convert()
         self.background_rect = self.background_surf.get_rect()
         self.background_pos = pygame.Vector2((0,0))
+
     def track(self,target):
-      
-           # Where we want the camera to be
+        # Volg de speler vloeiend, kijk een beetje vooruit.
         max_dist_sq = (self.offset.y - 100)**2  # max distance from player to desired camera pos
-    
         desired_pos = target.pos  # fallback to current pos
+        
         for prediction in target.position_estimation[:3]:
             if (prediction - target.pos).magnitude_squared() < max_dist_sq:
                 desired_pos = prediction
@@ -202,7 +265,7 @@ class Camera(BasicObject):
                 break
         
         # Smooth lerp toward desired position
-        LERP_SPEED = 0.08  # 0.0 = no movement, 1.0 = instant snap
+        LERP_SPEED = 0.08  # 0 = staat stil, 1 = springt direct
         
         delta = desired_pos - self.pos
         
@@ -214,11 +277,10 @@ class Camera(BasicObject):
             self.pos += delta * LERP_SPEED * ease_factor
         
     def background_draw(self):
-        #tiles background 
+        # Tegelt de achtergrondafbeelding zodat hij oneindig groot lijkt.
         self.pre_screen.fill((0,0,0))
         bg_w = self.background_surf.get_width()
         bg_h = self.background_surf.get_height()
-        
         
         # offset into the tile based on camera position
         start_x = -int(self.pos.x % bg_w)
@@ -232,7 +294,9 @@ class Camera(BasicObject):
                 self.pre_screen.blit(self.background_surf, (x, y))
                 y += bg_w
             x += bg_h
+
     def debug_draw(self,group):
+        # Tekent snelheidsvectoren en hitboxen (alleen zichtbaar als debug=True)
         if not hasattr(group,'__iter__'): # catches when attempting to draw a single object
             group = [group]
         for sprite in group:
@@ -249,19 +313,26 @@ class Camera(BasicObject):
                 pygame.draw.circle(self.pre_screen, 'blue', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, Planet) and debug_planet:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
+
     def player_predict_draw(self):
+        # Tekent de voorspelde baan van de speler als witte stippen
         for e in player.position_estimation:
             pygame.draw.circle(self.pre_screen, 'white', e - self.pos + self.offset , 4)
         
     def draw(self,group):
+        # Tekent alle objecten in de groep op het scherm
         if not hasattr(group,'__iter__'): # catches when attempting to draw a single object
             group = [group]
         for sprite in group:
             pos = sprite.get_frame_pos() - self.pos + self.offset
             self.pre_screen.blit(sprite.image,pos)
-    def finalise(self):   
+
+    def finalise(self):
+        # Schaal de pre_screen naar het echte venster en toon hem   
         self.final_screen.blit(pygame.transform.rotozoom(self.pre_screen, 0, self.scaler),(0,0))
+    
     def freecam(self):
+        # Beweeg de camera vrij met de pijltjestoetsen
         keys = pygame.key.get_pressed()
         for key in keys:
             if keys[pygame.K_LEFT]:
@@ -271,42 +342,49 @@ class Camera(BasicObject):
             if keys[pygame.K_UP]:
                 self.pos += (0,-0.05)
             if keys[pygame.K_DOWN]:
-                self.pos += (0,0.05)     
+                self.pos += (0,0.05)    
+
 class Spaceship(PhysicsObject,RotatingObject,VisualObject):
+    # Een ruimteschip: combineert physics, rotatie en een afbeelding. Berekent ook een voorspelde baan.
     def __init__(self, pos, vel, angle,image ,**kwargs):
         super().__init__(pos = pos,image = image ,vel = vel , mass = 100, angle = angle , hitbox_radius= 15, **kwargs)
         self.position_estimation = []
+    
     def pos_estimation_update(self,steps=5):
+        # Simuleert de toekomstige baan door een kopie van het schip vooruit te bewegen zonder het echte schip aan te passen.
         active_object.remove(self)
         self.position_estimation.clear()
+        
         tester = PhysicsObject(pos = self.pos,vel= self.vel,force = self.force,mass=self.mass,hitbox_radius= self.hitbox_radius)
+        
         for i in range(steps):
             for i in range (32):
                 tester.pre_update()
                 tester.update()
             self.position_estimation.append(tester.pos)
+        
         active_object.add(self)
-            
-        
-        
-        
-            
+                
     def collision_check(self):
+        # Controleer of het schip een planeet raakt en stuit dan terug.
         for sprite in active_object:
             if self.hit(sprite):
                 if isinstance(sprite, Planet):
                     self.elastic_collision(sprite,energy_dis= 1.1)
                                       
     def update(self):
-        
         self.angle_dampen()
         self.collision_check()
         super().update()
+
 class Player(Spaceship):
+    # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
         super().__init__(pos = pos, image = 'graphics/player/spaceship1.png',vel = vel, angle = angle)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.2)
+    
     def input_check(self):
+        # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP] or keys[pygame.K_w]:
             a = pygame.math.Vector2()
@@ -325,11 +403,14 @@ class Player(Spaceship):
             self.angle_moment += 20
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             self.angle_moment += -20
+    
     def update(self):
         if not debug_freecam: self.input_check()
         self.pos_estimation_update()
         super().update()
-#%% functions
+
+# Hulpfuncties
+
 def simpel_planet_spawn(player):
     #temperorary helper for planet tests
     pos = player.pos + pygame.Vector2(random.uniform(400, 800),random.uniform(400, 800))
@@ -337,29 +418,31 @@ def simpel_planet_spawn(player):
     density = 2.5
     
     active_object.add(Planet(pos,vel,'icy',density,size=random.uniform(0.1,1.5)))
+
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
-#%% prefabs
+
+# Prefabs
 all_prefabs = {}
+
 def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2 = None, separation=None):
+    # Maakt twee planeten die om hun gemeenschappelijk zwaartepunt draaien. Als parameters weggelaten worden, worden willekeurige waarden gekozen.
+    
     density1 = density1 or random.uniform(1,4)
     size1 = size1 or random.uniform(0.5,2)
     density2 = density2 or random.uniform(1,4)
     size2 = size2 or random.uniform(0.5,2)
     separation = separation or random.uniform(500,2000)
     
-    
-    
-    
     mass1 = 2500 * density1 * size1**2
     mass2 = 2500 * density2 * size2**2
     
-    # center of mass
+    # Afstand tot het gemeenschappelijk zwaartepunt
     total_mass = mass1 + mass2
     r1 = separation * mass2 / total_mass  # distance of body1 from CoM
     r2 = separation * mass1 / total_mass  # distance of body2 from CoM
     
-    # orbital velocity for circular orbit
+    # Orbitale snelheid voor een cirkelvormige baan
     v1 = (grav_cte * mass2**2 / (total_mass * separation)) ** 0.5
     v2 = (grav_cte * mass1**2 / (total_mass * separation)) ** 0.5
     
@@ -372,7 +455,9 @@ def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2
     active_object.add(p1)
     active_object.add(p2)
     return p1, p2
+
 def prefab_moon_system(pos, moon_count=3):
+    # Maakt een centrale planeet met "moon_count" manen eromheen.
     central = Planet(pos, (0,0), random_planet_type(), 4.0, size=1.8)
     active_object.add(central)
     for i in range(moon_count):
@@ -384,8 +469,7 @@ def prefab_moon_system(pos, moon_count=3):
         active_object.add(Planet(pos + offset, vel, 'moon', 
                                  random.uniform(1,2), size=random.uniform(0.1, 0.25)))
 
-
-#%% main function
+# Main function
 
 def main():
     if not debug_freecam:
@@ -403,13 +487,16 @@ def main():
                 if event.key == pygame.K_RETURN:
                     prefab_moon_system(player.pos + (4000,0))
         
+        # Beweeg alle objecten
         active_object.update()
         
+        # Beweeg de camera
         if debug_freecam:
             camera.freecam()
         else:
             camera.track(player)
-            
+        
+        # Teken alles
         camera.background_draw()
         camera.draw(active_object)
         camera.draw(player)
@@ -418,8 +505,10 @@ def main():
             camera.debug_draw(player)
             camera.debug_draw(active_object)
         camera.finalise()
+        
         pygame.display.update()
         clock.tick(fps)
+
 #%% actually what runs 
 # try-except prevents kernel crash in case of bug, because pygame needs to quit proper 
 pygame.init()
@@ -431,7 +520,7 @@ try:
 
 
     true_width = 4000 # change to alter game size
-    screen = pygame.display.set_mode((width, height))
+    screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
     debug = True
     debug_player = True
