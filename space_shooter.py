@@ -380,6 +380,7 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
 class Player(Spaceship):
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
+        self.shoot_cooldown = 0
         super().__init__(pos = pos, image = 'graphics/player/spaceship1.png',vel = vel, angle = angle)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.2)
     
@@ -408,7 +409,101 @@ class Player(Spaceship):
         if not debug_freecam: self.input_check()
         self.pos_estimation_update()
         super().update()
+        if self.shoot_cooldown > 0:
+            self.shoot_cooldown -= 1
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_SPACE]:
+            self.shoot()
+   
+    def shoot(self):
+        # Vuurt een kogel af in de richting die het schip op wijst.
+        if self.shoot_cooldown > 0:
+            return   # nog niet klaar: wacht
+    
+        # Bereken de richting (vector) van de neus van het schip
+        direction = pygame.math.Vector2()
+        direction.from_polar((1, -self.angle))   # eenheidsvector in schiprichting
+    
+        bullet_speed = 800   # hoe snel de kogel vliegt (pixels/seconde)
+    
+        # Startpositie: iets voor de neus van het schip, zodat hij niet meteen zichzelf raakt
+        spawn_pos = self.pos + direction * (self.hitbox_radius + 10)
+    
+        # Snelheid van kogel = schipsnelheid + eigen snelheid in schiprichting
+        bullet_vel = self.vel + direction * bullet_speed
+    
+        new_bullet = Bullet(pos=spawn_pos, vel=bullet_vel)
+        bullets.add(new_bullet)
+    
+        self.shoot_cooldown = 15   # wacht 15 frames (= 0.25s) voor volgende schot
 
+class Bullet(PhysicsObject, VisualObject):
+# Een kogel die het schip afvuurt.
+
+    def __init__(self, pos, vel):
+        # Maak een klein oranje cirkeltje als afbeelding voor de kogel
+        bullet_surface = pygame.Surface((8, 8), pygame.SRCALPHA)
+        pygame.draw.circle(bullet_surface, (255, 180, 50), (4, 4), 4)
+
+        super().__init__(pos=pos, vel=vel, mass=1, hitbox_radius=4,image=bullet_surface)
+
+        self.max_lifetime = 180   # kogel leeft maximaal 180 frames
+        self.lifetime     = 0
+        self.alive        = True  
+
+    def update(self):
+        self.lifetime += 1
+        if self.lifetime >= self.max_lifetime:
+            self.alive = False    
+        super().update()
+
+class Target(PhysicsObject, VisualObject):
+# Een doelobject om op te schieten.
+
+    def __init__(self, pos, vel=(0, 0), size=1.0):
+        # Grootte in pixels, schaalbaar via size
+        pixel_size = int(60 * size)   
+        hitbox = int(30 * size)
+
+        target_surface = pygame.Surface((pixel_size, pixel_size), pygame.SRCALPHA)
+        pygame.draw.rect(target_surface, (220, 50, 50), (0, 0, pixel_size, pixel_size), border_radius=6)
+        pygame.draw.rect(target_surface, (255, 100, 100), (0, 0, pixel_size, pixel_size), width=2, border_radius=6)
+
+        super().__init__(pos=pos, vel=vel, mass=10, hitbox_radius=hitbox, image=target_surface)
+
+        self.alive = True
+
+    def update(self):
+        super().update()
+
+class BulletGroup:
+# Beheert alle kogels die momenteel actief zijn.
+
+    def __init__(self):
+        self.bullets = []   # lijst met alle actieve Bullet-objecten
+
+    def add(self, bullet: Bullet):
+        self.bullets.append(bullet)
+
+    def update(self, targets):
+        for bullet in self.bullets:
+            bullet.pre_update()
+            bullet.update()
+
+            # Controleer botsing met elk target
+            for target in targets:
+                if target.alive and bullet.hit(target):
+                    bullet.alive = False    # kogel verdwijnt na treffer
+                    target.alive = False    # target ook weg
+                    # Plaats voor toevoegen score etc. 
+
+            # Controleer botsing met planeten (kogel verdwijnt, planeet niet)
+            for obj in active_object:
+                if isinstance(obj, Planet) and bullet.hit(obj):
+                    bullet.alive = False
+
+        # Gooi dode kogels weg
+        self.bullets = [bullet for bullet in self.bullets if bullet.alive]
 # Hulpfuncties
 
 def simpel_planet_spawn(player):
@@ -472,11 +567,15 @@ def prefab_moon_system(pos, moon_count=3):
 # Main function
 
 def main():
+    # Spawn targets éénmalig vóór de loop
+    for i in range(5):
+        pos = (random.uniform(-1000, 1000), random.uniform(-1000, 1000))
+        targets.append(Target(pos, size=1.5))
+
     if not debug_freecam:
         active_object.add(player)
     prefab_binary_planet((0,4000))
-    #active_object.add(Planet((1500,0),(0,0),'icy',2.5,size=1.2))
-    #active_object.add(Planet((2400,0),(0,250),'icy',1.4,size=0.2))
+
     while True: 
         
         for event in pygame.event.get():
@@ -489,6 +588,10 @@ def main():
         
         # Beweeg alle objecten
         active_object.update()
+        bullets.update(targets)
+
+        # Verwijder geraakte targets (deze regel past de bestaande lijst aan, geen nieuwe lijst)
+        targets[:] = [t for t in targets if t.alive]
         
         # Beweeg de camera
         if debug_freecam:
@@ -499,6 +602,8 @@ def main():
         # Teken alles
         camera.background_draw()
         camera.draw(active_object)
+        camera.draw(bullets.bullets)
+        camera.draw(targets)
         camera.draw(player)
         camera.player_predict_draw()
         if debug:
@@ -519,7 +624,7 @@ try:
     height = int(info.current_h * 0.9)  # 90% of screen height
 
 
-    true_width = 4000 # change to alter game size
+    true_width = 2000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
     debug = True
@@ -533,6 +638,8 @@ try:
     timestep = 1/fps
     grav_cte = 6000
     active_object = ActiveObjects()
+    bullets = BulletGroup()
+    targets = []
     
     main()
 except:
