@@ -75,7 +75,7 @@ class GravityObject(BasicObject):
             return
         diff = other.pos - self.pos
         dist_sq = diff.magnitude_squared()
-        if dist_sq > 6000 ** 2:
+        if dist_sq > 2000 ** 2:
             return  # Te ver weg: geen invloed
 
         # Standaard gravitatiewet: F = G * m1 * m2 / r²  (als vector)
@@ -83,6 +83,8 @@ class GravityObject(BasicObject):
 
         if isinstance(self, Spaceship):
             f += grav_cte * 0.01 * self.mass * other.mass * diff / dist_sq ** 1.3
+        if f.magnitude_squared() < 50**2 and isinstance(self,Planet):
+            return (0,0)
         return f
         
     def get_total_gravity(self):
@@ -229,41 +231,51 @@ class Planet(PhysicsObject,VisualObject):
                 if isinstance(sprite, Planet):
                     self.elastic_collision(sprite,energy_dis= 0.9)
                     
-        
-    def update(self):
-        super().update()
+    def pre_update(self):
         if isinstance(self,MovingObject):
             self.resolve_collisions()
+        super().pre_update()
+    def update(self):
+        super().update()
+        
 
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
     def __init__(self,screen):
         super().__init__()
-        self.final_screen = screen
-        self.scaler = self.final_screen.get_width()/true_width
-        self.pre_screen = pygame.Surface((true_width,int(self.final_screen.get_height()/self.scaler)))
-        self.screen_height = self.pre_screen.get_height()
-        self.screen_width = self.pre_screen.get_width()
         
-        # Camera-offset = midden van het scherm
-        self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)
+        self.final_screen = screen
         
         #achtergrond
         self.background_surf = pygame.image.load('graphics/background/Starfield_05-1024x1024.png').convert()
         self.background_rect = self.background_surf.get_rect()
         self.background_pos = pygame.Vector2((0,0))
-
-    def track(self,target):
+        
+        self.zoom_level = 1.0
+        self.min_zoom = 3
+        self.max_zoom = 1
+        self._rebuild_pre_screen()
+    def _rebuild_pre_screen(self):
+        # The pre_screen represents (true_width / zoom) world units
+        # but is always rendered at the same pixel size
+        effective_width = true_width / self.zoom_level
+        effective_height = int(self.final_screen.get_height() / self.final_screen.get_width() * effective_width)
+        self.pre_screen = pygame.Surface((int(effective_width), effective_height))
+        self.scaler = self.final_screen.get_width() / effective_width
+        self.screen_width = self.pre_screen.get_width()
+        self.screen_height = self.pre_screen.get_height()
+        self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)
+        
+    def zoom(self, zoom_level):
+        self.zoom_level = zoom_level
+        self._rebuild_pre_screen()
+    def track(self,target:'Player'):
         # Volg de speler vloeiend, kijk een beetje vooruit.
-        max_dist_sq = (self.offset.y - 100)**2  # max distance from player to desired camera pos
-        desired_pos = target.pos  # fallback to current pos
         
-        for prediction in target.position_estimation[:3]:
-            if (prediction - target.pos).magnitude_squared() < max_dist_sq:
-                desired_pos = prediction
-            else:
-                break
         
+        desired_pos = target.position_estimation[1]  # fallback to current pos
+        
+       
         # Smooth lerp toward desired position
         LERP_SPEED = 0.08  # 0 = staat stil, 1 = springt direct
         
@@ -273,8 +285,18 @@ class Camera(BasicObject):
         dist = delta.magnitude()
         if dist > 0:
             # Ease out: slow down as we approach target
-            ease_factor = min(dist / 200, 1.0)  # 200 = full-speed radius
-            self.pos += delta * LERP_SPEED * ease_factor
+            
+            self.pos += delta * LERP_SPEED 
+        
+        
+        last_pred = target.position_estimation[-1]
+        delta = (last_pred - self.pos).magnitude() + 100 
+        base_half_h = (self.final_screen.get_height() / self.final_screen.get_width() * true_width) / 2
+            
+        required_zoom = base_half_h / delta if delta > 0 else self.base_zoom
+        required_zoom = pygame.math.clamp(required_zoom, self.max_zoom, self.min_zoom)
+        self.zoom_level += (required_zoom - self.zoom_level) * 0.05
+        self._rebuild_pre_screen()
         
     def background_draw(self):
         # Tegelt de achtergrondafbeelding zodat hij oneindig groot lijkt.
@@ -282,9 +304,14 @@ class Camera(BasicObject):
         bg_w = self.background_surf.get_width()
         bg_h = self.background_surf.get_height()
         
+        
+        top_left_x = self.pos.x - self.offset.x
+        top_left_y = self.pos.y - self.offset.y
+        
         # offset into the tile based on camera position
-        start_x = -int(self.pos.x % bg_w)
-        start_y = -int(self.pos.y % bg_h)
+        start_x = -int(top_left_x % bg_w)
+        start_y = -int(top_left_y % bg_h)
+        
         
         # tile across the full screen
         x = start_x
@@ -316,8 +343,8 @@ class Camera(BasicObject):
 
     def player_predict_draw(self):
         # Tekent de voorspelde baan van de speler als witte stippen
-        for e in player.position_estimation:
-            pygame.draw.circle(self.pre_screen, 'white', e - self.pos + self.offset , 4)
+        for pos in player.position_estimation:
+            pygame.draw.circle(self.pre_screen, 'white', pos - self.pos + self.offset , 4)
         
     def draw(self,group):
         # Tekent alle objecten in de groep op het scherm
@@ -328,8 +355,12 @@ class Camera(BasicObject):
             self.pre_screen.blit(sprite.image,pos)
 
     def finalise(self):
-        # Schaal de pre_screen naar het echte venster en toon hem   
-        self.final_screen.blit(pygame.transform.rotozoom(self.pre_screen, 0, self.scaler),(0,0))
+        # Schaal de pre_screen naar het echte venster en toon hem
+        scaled = pygame.transform.rotozoom(self.pre_screen, 0, self.scaler)
+        x = (self.final_screen.get_width() - scaled.get_width()) // 2
+        y = (self.final_screen.get_height() - scaled.get_height()) // 2
+        self.final_screen.blit(scaled, (x, y))
+        
     
     def freecam(self):
         # Beweeg de camera vrij met de pijltjestoetsen
@@ -461,22 +492,21 @@ def prefab_moon_system(pos, moon_count=3):
     central = Planet(pos, (0,0), random_planet_type(), 4.0, size=1.8)
     active_object.add(central)
     for i in range(moon_count):
-        r = 400 + i * 250
+        r = 800 + i * 300
         v = (grav_cte * central.mass / r) ** 0.5
         angle = random.uniform(0, 360)
         offset = pygame.Vector2(r, 0).rotate(angle)
         vel = pygame.Vector2(v, 0).rotate(angle + 90)
         active_object.add(Planet(pos + offset, vel, 'moon', 
-                                 random.uniform(1,2), size=random.uniform(0.1, 0.25)))
+                                 random.uniform(1,2), size=random.uniform(0.25, 0.55)))
 
 # Main function
 
 def main():
     if not debug_freecam:
         active_object.add(player)
-    prefab_binary_planet((0,4000))
-    #active_object.add(Planet((1500,0),(0,0),'icy',2.5,size=1.2))
-    #active_object.add(Planet((2400,0),(0,250),'icy',1.4,size=0.2))
+    #prefab_binary_planet((0,4000))
+    
     while True: 
         
         for event in pygame.event.get():
@@ -486,7 +516,7 @@ def main():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
                     prefab_moon_system(player.pos + (4000,0))
-        
+                
         # Beweeg alle objecten
         active_object.update()
         
@@ -505,9 +535,11 @@ def main():
             camera.debug_draw(player)
             camera.debug_draw(active_object)
         camera.finalise()
-        
+        #print(clock.get_fps())
         pygame.display.update()
         clock.tick(fps)
+        print(camera.zoom_level)
+        print(camera.pos)
 
 #%% actually what runs 
 # try-except prevents kernel crash in case of bug, because pygame needs to quit proper 
@@ -522,7 +554,7 @@ try:
     true_width = 4000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = True
+    debug = False
     debug_player = True
     debug_planet = True
     debug_freecam = False
