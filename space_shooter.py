@@ -53,7 +53,7 @@ class MovingObject(BasicObject):
     def next_vel(self,steps = 1):
         # Berekent snelheid na "steps" (kinematica)
         return self.vel + self.acc * timestep*steps
-
+    
     def update(self):
         self.pos = self.next_pos()
         self.vel = self.next_vel()
@@ -83,7 +83,7 @@ class GravityObject(BasicObject):
 
         if isinstance(self, Spaceship):
             f += grav_cte * 0.01 * self.mass * other.mass * diff / dist_sq ** 1.3
-        if f.magnitude_squared() < 50**2 and isinstance(self,Planet):
+        if f.magnitude_squared()/self.mass < 200**2 and isinstance(self,Planet):
             return (0,0)
         return f
         
@@ -230,14 +230,14 @@ class Planet(PhysicsObject,VisualObject):
             if id(sprite)< id(self) and self.hit(sprite):
                 if isinstance(sprite, Planet):
                     self.elastic_collision(sprite,energy_dis= 0.9)
-                    
+              
     def pre_update(self):
         if isinstance(self,MovingObject):
             self.resolve_collisions()
         super().pre_update()
     def update(self):
-        super().update()
         
+        super().update()       
 
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
@@ -435,6 +435,8 @@ class Player(Spaceship):
             self.angle_moment += 20
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             self.angle_moment += -20
+        if keys[pygame.K_SPACE]:
+            self.shoot()
     
     def update(self):
         if not debug_freecam: self.input_check()
@@ -442,9 +444,8 @@ class Player(Spaceship):
         super().update()
         if self.shoot_cooldown > 0:
             self.shoot_cooldown -= 1
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_SPACE]:
-            self.shoot()
+        
+        
    
     def shoot(self):
         # Vuurt een kogel af in de richting die het schip op wijst.
@@ -480,12 +481,23 @@ class Bullet(PhysicsObject, VisualObject):
 
         self.max_lifetime = 180   # kogel leeft maximaal 180 frames
         self.lifetime     = 0
-        self.alive        = True  
-
+          
+    def kys(self):
+        bullets.remove(self)
+    def check_collisions(self):
+        for obj in active_object:
+            if self.hit(obj):
+                if isinstance(obj, Planet):
+                    self.kys()
+                elif isinstance(obj, Target):
+                    obj.kys()
+                    self.kys()
+                
     def update(self):
         self.lifetime += 1
         if self.lifetime >= self.max_lifetime:
-            self.alive = False    
+            self.kys()
+        self.check_collisions()
         super().update()
 
 class Target(PhysicsObject, VisualObject):
@@ -501,49 +513,20 @@ class Target(PhysicsObject, VisualObject):
         pygame.draw.rect(target_surface, (255, 100, 100), (0, 0, pixel_size, pixel_size), width=2, border_radius=6)
 
         super().__init__(pos=pos, vel=vel, mass=10, hitbox_radius=hitbox, image=target_surface)
-
-        self.alive = True
-
+    def kys(self):
+        active_object.remove(self)
     def update(self):
         super().update()
 
-class BulletGroup:
-# Beheert alle kogels die momenteel actief zijn.
 
-    def __init__(self):
-        self.bullets = []   # lijst met alle actieve Bullet-objecten
-
-    def add(self, bullet: Bullet):
-        self.bullets.append(bullet)
-
-    def update(self, targets):
-        for bullet in self.bullets:
-            bullet.pre_update()
-            bullet.update()
-
-            # Controleer botsing met elk target
-            for target in targets:
-                if target.alive and bullet.hit(target):
-                    bullet.alive = False    # kogel verdwijnt na treffer
-                    target.alive = False    # target ook weg
-                    # Plaats voor toevoegen score etc. 
-
-            # Controleer botsing met planeten (kogel verdwijnt, planeet niet)
-            for obj in active_object:
-                if isinstance(obj, Planet) and bullet.hit(obj):
-                    bullet.alive = False
-
-        # Gooi dode kogels weg
-        self.bullets = [bullet for bullet in self.bullets if bullet.alive]
 # Hulpfuncties
 
-def simpel_planet_spawn(player):
+def simpel_planet_spawn(pos,vel= None):
     #temperorary helper for planet tests
-    pos = player.pos + pygame.Vector2(random.uniform(400, 800),random.uniform(400, 800))
-    vel = pygame.Vector2(random.uniform(-200, 200),random.uniform(-200, 200))
+    vel = vel or pygame.Vector2(random.uniform(-200, 200),random.uniform(-200, 200))
     density = 2.5
     
-    active_object.add(Planet(pos,vel,'icy',density,size=random.uniform(0.1,1.5)))
+    active_object.add(Planet(pos,vel,random_planet_type(),density,size=random.uniform(0.1,1.5)))
 
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
@@ -553,13 +536,11 @@ all_prefabs = {}
 
 def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2 = None, separation=None):
     # Maakt twee planeten die om hun gemeenschappelijk zwaartepunt draaien. Als parameters weggelaten worden, worden willekeurige waarden gekozen.
-    
     density1 = density1 or random.uniform(1,4)
     size1 = size1 or random.uniform(0.5,2)
     density2 = density2 or random.uniform(1,4)
     size2 = size2 or random.uniform(0.5,2)
     separation = separation or random.uniform(500,2000)
-    
     mass1 = 2500 * density1 * size1**2
     mass2 = 2500 * density2 * size2**2
     
@@ -582,32 +563,34 @@ def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2
     active_object.add(p2)
     return p1, p2
 
-def prefab_moon_system(pos, moon_count=3):
+def prefab_moon_system(pos, moon_count=None):
     # Maakt een centrale planeet met "moon_count" manen eromheen.
     central = Planet(pos, (0,0), random_planet_type(), 4.0, size=1.8)
     active_object.add(central)
+    moon_count = moon_count or random.randint(1,4)
+    angle = 0
     for i in range(moon_count):
         r = 800 + i * 300
         v = (grav_cte * central.mass / r) ** 0.5
-        angle = random.uniform(0, 360)
         offset = pygame.Vector2(r, 0).rotate(angle)
         vel = pygame.Vector2(v, 0).rotate(angle + 90)
         active_object.add(Planet(pos + offset, vel, 'moon', 
                                  random.uniform(1,2), size=random.uniform(0.25, 0.55)))
+        angle += 360 // moon_count
 
 # Main function
 
 def main():
     # Spawn targets éénmalig vóór de loop
+    '''
     for i in range(5):
         pos = (random.uniform(-1000, 1000), random.uniform(-1000, 1000))
-        targets.append(Target(pos, size=1.5))
-
+        active_object.append(Target(pos, size=1.5))
+    '''
     if not debug_freecam:
         active_object.add(player)
-    prefab_binary_planet((0,4000))
-    #active_object.add(Planet((1500,0),(0,0),'icy',2.5,size=1.2))
-    #active_object.add(Planet((2400,0),(0,250),'icy',1.4,size=0.2))
+    
+    
     while True: 
         
         for event in pygame.event.get():
@@ -616,14 +599,16 @@ def main():
                 exit()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
-                    prefab_moon_system(player.pos + (4000,0))
+                    prefab_moon_system(camera.pos)
+                if event.key == pygame.K_p:
+                    prefab_binary_planet(camera.pos)
+                if event.key == pygame.K_o:
+                    simpel_planet_spawn(camera.pos,vel=(0,0))
                 
         # Beweeg alle objecten
         active_object.update()
-        bullets.update(targets)
+        bullets.update()
 
-        # Verwijder geraakte targets (deze regel past de bestaande lijst aan, geen nieuwe lijst)
-        targets[:] = [t for t in targets if t.alive]
         
         # Beweeg de camera
         if debug_freecam:
@@ -634,9 +619,7 @@ def main():
         # Teken alles
         camera.background_draw()
         camera.draw(active_object)
-        camera.draw(bullets.bullets)
-        camera.draw(targets)
-        camera.draw(player)
+        camera.draw(bullets) 
         camera.player_predict_draw()
         if debug:
             camera.debug_draw(player)
@@ -645,8 +628,11 @@ def main():
         #print(clock.get_fps())
         pygame.display.update()
         clock.tick(fps)
-        print(camera.zoom_level)
-        print(camera.pos)
+        for obj in active_object:
+            print(type(obj),obj.vel.magnitude())
+            for otherobj in active_object:
+                if id(otherobj) > id(obj):
+                    print((obj.pos - otherobj.pos).magnitude())
 
 #%% actually what runs 
 # try-except prevents kernel crash in case of bug, because pygame needs to quit proper 
@@ -658,13 +644,13 @@ try:
     height = int(info.current_h * 0.9)  # 90% of screen height
 
 
-    true_width = 2000 # change to alter game size
+    true_width = 4000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = False
+    debug = True
     debug_player = True
     debug_planet = True
-    debug_freecam = False
+    debug_freecam = True
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
@@ -672,8 +658,8 @@ try:
     timestep = 1/fps
     grav_cte = 6000
     active_object = ActiveObjects()
-    bullets = BulletGroup()
-    targets = []
+    bullets = ActiveObjects()
+
     
     main()
 except:
