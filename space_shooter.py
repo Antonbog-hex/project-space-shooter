@@ -582,11 +582,11 @@ def prefab_moon_system(pos, moon_count=None):
 
 def main():
     # Spawn targets éénmalig vóór de loop
-    '''
+    
     for i in range(5):
         pos = (random.uniform(-1000, 1000), random.uniform(-1000, 1000))
         active_object.append(Target(pos, size=1.5))
-    '''
+    
     if not debug_freecam:
         active_object.add(player)
     
@@ -647,10 +647,10 @@ try:
     true_width = 4000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = True
+    debug = False
     debug_player = True
     debug_planet = True
-    debug_freecam = True
+    debug_freecam = False
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
