@@ -4,7 +4,7 @@ import random
 from sys import exit
 
 # Klassen
-
+# %% basic classes
 class BasicObject(): 
 
 # De meest fundamentele klasse. Elk object heeft een positie, alle andere klassen erven hiervan (direct of indirect)
@@ -17,7 +17,15 @@ class BasicObject():
 
     def pre_update(self):
         pass # idem, deze methode wordt aangeroepen voor update()
-
+    def kys(self):
+        if isinstance(self, Player):
+            raise Exception()
+        try:
+            active_object.remove(self)
+            bullets.remove(self)
+        except:
+            pass
+            
 class VisualObject(BasicObject):
 # Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
 
@@ -138,7 +146,7 @@ class CircularHitbox(Hitbox):
     def hit(self,other)-> bool:
         if isinstance(other, CircularHitbox):
             return (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius)**2 
-
+# %% combined classes
 class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
     # Combineert zwaartekracht + beweging + botsingsdetectie. Dit is de basis voor planeten en spaceships.
     def __init__(self, pos,vel = 0, force = 0, mass = 20, hitbox_radius = 20, **kwargs):
@@ -175,7 +183,25 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
 
          if isinstance(other,MovingObject):
              other.vel += impulse * self.mass * normal
-             other.pos -= normal*0.51*overlap         
+             other.pos -= normal*0.51*overlap       
+    def pre_update(self):
+        if isinstance(self,Predictor):
+            pass
+        elif not chunkmanager.in_safezone(self.pos):
+            
+            try:
+                chunkmanager.all_chunks[chunkmanager.get_chunk(self.pos)].append(self)
+                if not isinstance(self, Predictor):
+                    print(f'unloaded{self}')
+            except:
+                print(f"{self} entered a never before loaded chunk and was destroyed")
+            finally:
+                self.kys()
+        super().pre_update()
+                
+class Predictor(PhysicsObject):
+    def pre_update(self):
+        GravityObject.pre_update(self)           
 
 class ActiveObjects(list):
     # Lijst van alle actieve PhysicsObjects. Roept elke frame pre_update() en update() aan op elk object.
@@ -385,9 +411,7 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         # Simuleert de toekomstige baan door een kopie van het schip vooruit te bewegen zonder het echte schip aan te passen.
         active_object.remove(self)
         self.position_estimation.clear()
-        
-        tester = PhysicsObject(pos = self.pos,vel= self.vel,force = self.force,mass=self.mass,hitbox_radius= self.hitbox_radius)
-        
+        tester = Predictor(pos = self.pos,vel= self.vel,force = self.force,mass=self.mass,hitbox_radius= self.hitbox_radius)
         for i in range(steps):
             for i in range (32):
                 tester.pre_update()
@@ -407,7 +431,70 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         self.angle_dampen()
         self.collision_check()
         super().update()
-
+        
+class ChunkManager:
+    def __init__(self,chunk_size = (2000,2000),around_chunks = 1):
+        self.chunk_size = chunk_size
+        self.chunk_x = self.chunk_size[0]
+        self.chunk_y = self.chunk_size[1]
+        self.around_chunks = around_chunks
+        self.central_chunk = (0,0)
+        self.all_chunks = {}
+        self.active_chunks = set()
+        self.min_x = 0
+        self.max_x = 0
+        self.min_y = 0
+        self.max_y = 0
+    
+    def get_chunk(self,pos:pygame.Vector2):
+        return (int(pos.x // self.chunk_x ), int(pos.y //self.chunk_y))
+    def set_active(self,chunk):
+        self.active_chunks.add(chunk)
+        try:
+            for element in self.all_chunks[chunk]:
+                active_object.add(element)
+        except:
+            self.generate_chunk(chunk)
+            self.all_chunks[chunk] = []
+        
+    def set_inactive(self,chunk):
+        self.active_chunks.remove(chunk)
+    def active_chunk_update(self):
+        new_active_chunk = set()
+        for i in range(self.central_chunk[0]-self.around_chunks,self.central_chunk[0]+self.around_chunks+1):
+            for j in range(self.central_chunk[1]-self.around_chunks,self.central_chunk[1]+self.around_chunks+1):
+                chunk = (i,j)
+                new_active_chunk.add(chunk)
+        for chunk in new_active_chunk.difference(self.active_chunks):
+            self.set_active(chunk)
+        for chunk in self.active_chunks.difference(new_active_chunk):
+            self.set_inactive(chunk)
+        self.active_chunks = new_active_chunk
+    def calculate_safezone(self):
+        self.min_x = (self.central_chunk[0] - self.around_chunks) * self.chunk_size[0]
+        self.max_x = (self.central_chunk[0] + self.around_chunks+1) * self.chunk_size[0]
+        self.min_y = (self.central_chunk[1] - self.around_chunks) * self.chunk_size[1]
+        self.max_y = (self.central_chunk[1] + self.around_chunks+1) * self.chunk_size[1]
+    def in_safezone(self,pos:pygame.Vector2):
+        if pos.x < self.max_x and pos.x > self.min_x and pos.y < self.max_y and pos.y > self.min_y:
+            return True
+        return False
+    def get_center(self,chunk): 
+        return pygame.Vector2((chunk[0] + 0.5 )*self.chunk_x,(chunk[1] + 0.5 )*self.chunk_y)
+    def generate_chunk(self, chunk):
+        chunk_center = self.get_center(chunk)
+        prefab = random.choice(list(all_prefabs.values()))
+        self.all_chunks[chunk] = prefab(chunk_center)
+            
+    def update(self):
+        self.central_chunk = self.get_chunk(player.pos)
+        self.active_chunk_update()
+        self.calculate_safezone()
+        
+        
+        
+        
+# %% finished classes
 class Player(Spaceship):
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
@@ -482,8 +569,7 @@ class Bullet(PhysicsObject, VisualObject):
         self.max_lifetime = 180   # kogel leeft maximaal 180 frames
         self.lifetime     = 0
           
-    def kys(self):
-        bullets.remove(self)
+    
     def check_collisions(self):
         for obj in active_object:
             if self.hit(obj):
@@ -513,13 +599,12 @@ class Target(PhysicsObject, VisualObject):
         pygame.draw.rect(target_surface, (255, 100, 100), (0, 0, pixel_size, pixel_size), width=2, border_radius=6)
 
         super().__init__(pos=pos, vel=vel, mass=10, hitbox_radius=hitbox, image=target_surface)
-    def kys(self):
-        active_object.remove(self)
+    
     def update(self):
         super().update()
 
 
-# Hulpfuncties
+#%% Hulpfuncties
 
 def simpel_planet_spawn(pos,vel= None):
     #temperorary helper for planet tests
@@ -531,8 +616,8 @@ def simpel_planet_spawn(pos,vel= None):
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
 
-# Prefabs
-all_prefabs = {}
+#%% Prefabs
+
 
 def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2 = None, separation=None):
     # Maakt twee planeten die om hun gemeenschappelijk zwaartepunt draaien. Als parameters weggelaten worden, worden willekeurige waarden gekozen.
@@ -569,22 +654,25 @@ def prefab_moon_system(pos, moon_count=None):
     active_object.add(central)
     moon_count = moon_count or random.randint(1,4)
     angle = 0
+    spawned = [central]
     for i in range(moon_count):
         r = 800 + i * 300
         v = (grav_cte * central.mass / r) ** 0.5
         offset = pygame.Vector2(r, 0).rotate(angle)
         vel = pygame.Vector2(v, 0).rotate(angle + 90)
-        active_object.add(Planet(pos + offset, vel, 'moon', 
-                                 random.uniform(1,2), size=random.uniform(0.25, 0.55)))
+        moon = Planet(pos + offset, vel, 'moon', random.uniform(1,2), size=random.uniform(0.25, 0.55))
+        active_object.add(moon)
+        spawned.append(moon)
         angle += 360 // moon_count
-
-# Main function
+    return spawned
+all_prefabs = {'binary':prefab_binary_planet,'moon': prefab_moon_system}
+#%% Main function
 
 def main():
     # Spawn targets éénmalig vóór de loop
     
-    for i in range(5):
-        pos = (random.uniform(-1000, 1000), random.uniform(-1000, 1000))
+    for i in range(3):
+        pos = (random.uniform(100, 400), i * 200)
         active_object.append(Target(pos, size=1.5))
     
     if not debug_freecam:
@@ -604,7 +692,12 @@ def main():
                     prefab_binary_planet(camera.pos)
                 if event.key == pygame.K_o:
                     simpel_planet_spawn(camera.pos,vel=(0,0))
-                
+        
+        #update world gen
+        chunkmanager.update()
+        
+        
+        
         # Beweeg alle objecten
         active_object.update()
         bullets.update()
@@ -613,6 +706,7 @@ def main():
         # Beweeg de camera
         if debug_freecam:
             camera.freecam()
+            player.pos = camera.pos
         else:
             camera.track(player)
         
@@ -628,11 +722,13 @@ def main():
         #print(clock.get_fps())
         pygame.display.update()
         clock.tick(fps)
+        '''
         for obj in active_object:
             print(type(obj),obj.vel.magnitude())
             for otherobj in active_object:
                 if id(otherobj) > id(obj):
                     print((obj.pos - otherobj.pos).magnitude())
+        '''
 
 #%% actually what runs 
 # try-except prevents kernel crash in case of bug, because pygame needs to quit proper 
@@ -650,7 +746,7 @@ try:
     debug = False
     debug_player = True
     debug_planet = True
-    debug_freecam = False
+    debug_freecam = True
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
@@ -659,7 +755,7 @@ try:
     grav_cte = 6000
     active_object = ActiveObjects()
     bullets = ActiveObjects()
-
+    chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
     
     main()
 except:
