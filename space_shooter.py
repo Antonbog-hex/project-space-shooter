@@ -244,6 +244,10 @@ class Planet(PhysicsObject,VisualObject):
         elif style == 'moon':
             i = random.randint(0,4)
             path = f'graphics/planets/Moons/{i}.png'
+        elif style == 'black_hole':
+            path = 'graphics/planets/BlackHole/0.png'
+        elif style == 'sattelite':
+            path = 'graphics/planets/Satellite/0.png'
         else:
             raise ValueError(f'style:{style} is not supported')
         image = pygame.image.load(path).convert_alpha()
@@ -648,24 +652,93 @@ def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2
     active_object.add(p2)
     return p1, p2
 
+def spawn_in_orbit(center_pos, anchor_mass, r, angle, style, density, size):
+    v = (grav_cte * anchor_mass / r) ** 0.5
+    offset = pygame.Vector2(r, 0).rotate(angle)
+    vel = pygame.Vector2(v, 0).rotate(angle + 90)
+    planet = Planet(center_pos + offset, vel, style, density, size=size)
+    active_object.add(planet)
+    return planet
+
 def prefab_moon_system(pos, moon_count=None):
-    # Maakt een centrale planeet met "moon_count" manen eromheen.
     central = Planet(pos, (0,0), random_planet_type(), 4.0, size=1.8)
     active_object.add(central)
-    moon_count = moon_count or random.randint(1,4)
-    angle = 0
+
+    moon_count = moon_count or random.randint(1, 4)
     spawned = [central]
     for i in range(moon_count):
         r = 800 + i * 300
-        v = (grav_cte * central.mass / r) ** 0.5
-        offset = pygame.Vector2(r, 0).rotate(angle)
-        vel = pygame.Vector2(v, 0).rotate(angle + 90)
-        moon = Planet(pos + offset, vel, 'moon', random.uniform(1,2), size=random.uniform(0.25, 0.55))
-        active_object.add(moon)
+        angle = (360 / moon_count) * i
+        moon = spawn_in_orbit(pos, central.mass, r, angle,'moon', random.uniform(1, 2), random.uniform(0.25, 0.55))
         spawned.append(moon)
-        angle += 360 // moon_count
     return spawned
-all_prefabs = {'binary':prefab_binary_planet,'moon': prefab_moon_system}
+
+
+def prefab_asteroid_field(pos, count=None):
+    count = count or random.randint(6, 12)
+    spawned = []
+    for i in range(count):
+        offset = pygame.Vector2(random.uniform(-800, 800), random.uniform(-800, 800))
+        vel = pygame.Vector2(random.uniform(-80, 80),   random.uniform(-80, 80))
+        asteroid = Planet(pos + offset, vel, 'moon', random.uniform(2, 5), size=random.uniform(0.05, 0.2))
+        active_object.add(asteroid)
+        spawned.append(asteroid)
+    return spawned
+
+
+def prefab_black_hole(pos):
+    bh = Planet(pos, (0, 0), 'black_hole', density=50, size=0.6)
+    active_object.add(bh)
+
+    spawned = [bh]
+    ring_count = random.randint(4, 8)
+    for i in range(ring_count):
+        r = random.uniform(400, 900)
+        angle = (360 / ring_count) * i
+        debris = spawn_in_orbit(pos, bh.mass, r, angle,'moon', random.uniform(1, 3), random.uniform(0.05, 0.15))
+        spawned.append(debris)
+    return spawned
+
+def prefab_triple_star(pos):
+    p1, p2 = prefab_binary_planet(pos, density1=4, size1=1.2, density2=3.5, size2=1.0, separation=600)
+    inner_mass = p1.mass + p2.mass
+    r_outer = random.uniform(1500, 2500)
+    p3 = spawn_in_orbit(pos, inner_mass, r_outer, 0, random_planet_type(), 3.0, random.uniform(0.8, 1.4))
+    return p1, p2, p3
+
+def prefab_ringed_planet(pos):
+    central = Planet(pos, (0, 0), random_planet_type(), density=3.5, size=2.0)
+    active_object.add(central)
+    
+    spawned = [central]
+    ring_count = random.randint(10, 18)
+    for i in range(ring_count):
+        angle = (360 / ring_count) * i
+        moon = spawn_in_orbit(pos, central.mass, 700, angle,'moon', random.uniform(1, 2), random.uniform(0.05, 0.12))
+        spawned.append(moon)
+    return spawned
+
+def prefab_satellite_network(pos):
+    central = Planet(pos, (0, 0), random_planet_type(), density=3.5, size=1.5)
+    active_object.add(central)
+
+    spawned = [central]
+    for i in range(random.randint(3, 6)):
+        r = random.uniform(350, 900)
+        angle = random.uniform(0, 360)
+        sat = spawn_in_orbit(pos, central.mass, r, angle,'sattelite', 6.0, random.uniform(0.04, 0.09))
+        spawned.append(sat)
+    return spawned
+
+all_prefabs = {
+    'binary':     prefab_binary_planet,
+    'moon':       prefab_moon_system,
+    'asteroids':  prefab_asteroid_field,
+    'black_hole': prefab_black_hole,
+    'triple':     prefab_triple_star,
+    'ringed':     prefab_ringed_planet,
+    'satellite':  prefab_satellite_network,
+}
 #%% Main function
 
 def main():
