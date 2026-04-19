@@ -1,6 +1,7 @@
 import pygame
 import traceback
 import random
+import math
 from sys import exit
 
 # Klassen
@@ -65,6 +66,8 @@ class MovingObject(BasicObject):
     def update(self):
         self.pos = self.next_pos()
         self.vel = self.next_vel()
+        if self.vel.magnitude_squared() != 0:
+            self.vel.clamp_magnitude(1000)
         super().update()
 
 class GravityObject(BasicObject):
@@ -218,13 +221,8 @@ class ActiveObjects(list):
         for e in self:
             e.update() # the action (eg. movement)
 
-class Planet(PhysicsObject,VisualObject):
-    # Een planeet: heeft een afbeelding, massa (gebaseerd op dichtheid+grootte) en botst elastisch met andere planeten.
-    def __init__(self, pos, vel, style,density, size = 1):
-        image = Planet.get_image(style,size)
-        mass = 2500*density * size ** 2
-        super().__init__(pos = pos ,image = image,vel=vel,mass = mass,hitbox_radius=size*255)
     
+<<<<<<< Updated upstream
     def get_image(style,size):
         if style == 'icy':
             i = random.randint(0, 4)
@@ -268,6 +266,8 @@ class Planet(PhysicsObject,VisualObject):
     def update(self):
         
         super().update()       
+=======
+>>>>>>> Stashed changes
 
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
@@ -365,7 +365,12 @@ class Camera(BasicObject):
                 pygame.draw.line(self.pre_screen, 'red', pos, pos+a)
                 v = sprite.vel
                 pygame.draw.line(self.pre_screen, 'orange', pos, pos+v)
-            
+            if isinstance(sprite, Target):
+                pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
+            if isinstance(sprite, BaseEnemy):
+                pygame.draw.line(self.pre_screen,'white',pos,pos + pygame.Vector2.from_polar((20,-sprite.angle)))
+                pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
+                
             if isinstance(sprite, Player) and debug_player:
                 pygame.draw.circle(self.pre_screen, 'blue', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, Planet) and debug_planet:
@@ -427,10 +432,11 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     def collision_check(self):
         # Controleer of het schip een planeet raakt en stuit dan terug.
         for sprite in active_object:
-            if self.hit(sprite):
+            if id(sprite) < id (self) and self.hit(sprite):
                 if isinstance(sprite, Planet):
                     self.elastic_collision(sprite,energy_dis= 1.1)
-                                      
+                if isinstance(sprite,Spaceship):
+                    self.elastic_collision(sprite, energy_dis = 2)
     def update(self):
         self.angle_dampen()
         self.collision_check()
@@ -499,12 +505,61 @@ class ChunkManager:
         
         
 # %% finished classes
+class Planet(PhysicsObject,VisualObject):
+    # Een planeet: heeft een afbeelding, massa (gebaseerd op dichtheid+grootte) en botst elastisch met andere planeten.
+    def __init__(self, pos, vel, style,density, size = 1):
+        image = Planet.get_image(style,size)
+        mass = 2500*density * size ** 2
+        super().__init__(pos = pos ,image = image,vel=vel,mass = mass,hitbox_radius=size*255)
+    
+    def get_image(style,size):
+        if style == 'icy':
+            i = random.randint(0, 4)
+            path = f'graphics/planets/Ice/{i}.png'
+        elif style == 'tropical':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Tropical/{i}.png'
+        elif style == 'desert':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Desert/{i}.png'
+        elif style == 'ocean':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Ocean/{i}.png'
+        elif style == 'earth':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Alpine/{i}.png'
+        elif style == 'moon':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Moons/{i}.png'
+        else:
+            raise ValueError(f'style:{style} is not supported')
+        image = pygame.image.load(path).convert_alpha()
+        image = pygame.transform.rotozoom(image, 0, size)
+        return image
+
+    def resolve_collisions(self):
+        # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
+        for sprite in active_object:
+            if id(sprite)< id(self) and self.hit(sprite):
+                if isinstance(sprite, Planet):
+                    self.elastic_collision(sprite,energy_dis= 0.9)
+                if isinstance(sprite, Spaceship):
+                    self.elastic_collision(sprite,energy_dis= 1.5)
+              
+    def pre_update(self):
+        if isinstance(self,MovingObject):
+            self.resolve_collisions()
+        super().pre_update()
+    def update(self):
+        
+        super().update()   
 class Player(Spaceship):
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
         self.shoot_cooldown = 0
-        super().__init__(pos = pos, image = 'graphics/player/spaceship1.png',vel = vel, angle = angle)
-        self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.2)
+        super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle)
+        self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
+        self.image = self.base_image
     
     def input_check(self):
         # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
@@ -528,6 +583,7 @@ class Player(Spaceship):
             self.angle_moment += -20
         if keys[pygame.K_SPACE]:
             self.shoot()
+        
     
     def update(self):
         if not debug_freecam: self.input_check()
@@ -559,7 +615,62 @@ class Player(Spaceship):
         bullets.add(new_bullet)
     
         self.shoot_cooldown = 15   # wacht 15 frames (= 0.25s) voor volgende schot
-
+class BaseEnemy(Spaceship):
+    def __init__(self,pos,vel=0,angle=0,**kwargs):
+        super().__init__(image = 'graphics/enemies/enemy_1.png',vel=vel,pos=pos,angle=angle,**kwargs)
+        self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
+        self.image= self.base_image
+        self.target = None
+        self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
+    def patrol(self):
+        self.vel *= 0.00001
+        self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
+        if self.force.magnitude_squared() > 100:
+            desired_cw = self.force.rotate(90)
+            desired_ccw = self.force.rotate(-90)
+            
+            if self.vel.magnitude_squared() > 0:
+                desired_heading = desired_cw if abs(signed_angle_to(self.vel,desired_cw)) < abs(signed_angle_to(self.vel,desired_ccw)) else desired_ccw
+            else:
+                desired_heading = desired_cw
+            
+            turn_error = self.current_orientation.angle_to(desired_heading)
+            self.angle_moment += turn_error * 1  # tune this multiplier
+            
+            speed_along_heading = self.vel.dot(self.current_orientation)
+            alignment = self.vel.normalize().dot(self.current_orientation) if self.vel.magnitude_squared() > 0 else 0
+            
+            if speed_along_heading < 300 and alignment > 0.7:
+                #self.acc += self.current_orientation * 400
+                pass
+            if speed_along_heading > 800 and alignment > 0.7:
+               #self.acc -= self.current_orientation * 400
+               pass
+        elif self.vel.magnitude_squared() < 300**2:
+            #self.acc += self.current_orientation * 400
+            pass
+    def pre_update(self):
+        super().pre_update()
+        self.patrol()
+        
+class DebugMass(PhysicsObject,VisualObject):
+    def __init__(self):
+        super().__init__((50,50),mass = 300,image= pygame.Surface((20,20)).convert_alpha())
+    def update(self):
+        if pygame.mouse.get_pressed()[0]:
+            self.mass = 300
+            mouse_screen = pygame.Vector2(pygame.mouse.get_pos())
+            # convert screen pixels to pre_screen coordinates
+            mouse_pre = mouse_screen / camera.scaler
+            # convert pre_screen coordinates to world coordinates
+            mouse_world = mouse_pre - camera.offset + camera.pos
+            self.pos = mouse_world
+            self.vel = pygame.Vector2(0)
+        else:
+            self.mass = 0.01
+        super().update()
+                   
+    
 class Bullet(PhysicsObject, VisualObject):
 # Een kogel die het schip afvuurt.
 
@@ -619,7 +730,11 @@ def simpel_planet_spawn(pos,vel= None):
 
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
-
+def signed_angle_to(v1, v2):
+    # cross product gives sin of angle, dot gives cos
+    cross = v1.x * v2.y - v1.y * v2.x
+    dot = v1.dot(v2)
+    return math.degrees(math.atan2(cross, dot))
 #%% Prefabs
 
 
@@ -743,15 +858,16 @@ all_prefabs = {
 
 def main():
     # Spawn targets éénmalig vóór de loop
-    
-    for i in range(3):
-        pos = (random.uniform(100, 400), i * 200)
-        active_object.append(Target(pos, size=1.5))
-    
-    if not debug_freecam:
-        active_object.add(player)
-    
-    
+    ''' 
+     for i in range(3):
+         pos = (random.uniform(100, 400), i * 200)
+         active_object.append(Target(pos, size=1.5))
+     
+     if not debug_freecam:
+         active_object.add(player)
+     '''
+    active_object.add(BaseEnemy(pos = (800,0)))
+    active_object.add(DebugMass())
     while True: 
         
         for event in pygame.event.get():
@@ -816,7 +932,7 @@ try:
     true_width = 4000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = False
+    debug = True
     debug_player = True
     debug_planet = True
     debug_freecam = True
