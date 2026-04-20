@@ -222,52 +222,7 @@ class ActiveObjects(list):
             e.update() # the action (eg. movement)
 
     
-<<<<<<< Updated upstream
-    def get_image(style,size):
-        if style == 'icy':
-            i = random.randint(0, 4)
-            path = f'graphics/planets/Ice/{i}.png'
-        elif style == 'tropical':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Tropical/{i}.png'
-        elif style == 'desert':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Desert/{i}.png'
-        elif style == 'ocean':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Ocean/{i}.png'
-        elif style == 'earth':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Alpine/{i}.png'
-        elif style == 'moon':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Moons/{i}.png'
-        elif style == 'black_hole':
-            path = 'graphics/planets/BlackHole/0.png'
-        elif style == 'sattelite':
-            path = 'graphics/planets/Satellite/0.png'
-        else:
-            raise ValueError(f'style:{style} is not supported')
-        image = pygame.image.load(path).convert_alpha()
-        image = pygame.transform.rotozoom(image, 0, size)
-        return image
 
-    def resolve_collisions(self):
-        # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
-        for sprite in active_object:
-            if id(sprite)< id(self) and self.hit(sprite):
-                if isinstance(sprite, Planet):
-                    self.elastic_collision(sprite,energy_dis= 0.9)
-              
-    def pre_update(self):
-        if isinstance(self,MovingObject):
-            self.resolve_collisions()
-        super().pre_update()
-    def update(self):
-        
-        super().update()       
-=======
->>>>>>> Stashed changes
 
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
@@ -531,11 +486,29 @@ class Planet(PhysicsObject,VisualObject):
         elif style == 'moon':
             i = random.randint(0,4)
             path = f'graphics/planets/Moons/{i}.png'
+        elif style == 'black_hole':
+            path = 'graphics/planets/BlackHole/0.png'
+        elif style == 'sattelite':
+            path = 'graphics/planets/Satellite/0.png'
         else:
             raise ValueError(f'style:{style} is not supported')
         image = pygame.image.load(path).convert_alpha()
         image = pygame.transform.rotozoom(image, 0, size)
         return image
+
+    def resolve_collisions(self):
+        # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
+        for sprite in active_object:
+            if id(sprite)< id(self) and self.hit(sprite):
+                if isinstance(sprite, Planet):
+                    self.elastic_collision(sprite,energy_dis= 0.9)
+              
+    def pre_update(self):
+        if isinstance(self,MovingObject):
+            self.resolve_collisions()
+        super().pre_update()
+    def update(self):
+        super().update()       
 
     def resolve_collisions(self):
         # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
@@ -936,6 +909,7 @@ try:
     debug_player = True
     debug_planet = True
     debug_freecam = True
+    debug_disable_world_gen = True
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
