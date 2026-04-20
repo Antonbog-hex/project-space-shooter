@@ -601,7 +601,7 @@ class BaseEnemy(Spaceship):
         
         self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
         self.get_nearest_grav_object()
-        
+        desired_heading = None
         if not self.vel == (0,0):
             desired_heading = self.vel.normalize()
         if self.force.magnitude_squared() > 200**2 and self.nearest_grav != None:
@@ -630,9 +630,9 @@ class BaseEnemy(Spaceship):
                
         elif self.vel.magnitude_squared() < 300**2:
             self.acc += self.current_orientation * 400
-            
-        turn_error = signed_angle_to(desired_heading,self.current_orientation)
-        self.angle_moment += turn_error * 0.5 - self.angle_moment * 0.1  # tune this multiplier
+        if not desired_heading == None:
+            turn_error = signed_angle_to(desired_heading,self.current_orientation)
+            self.angle_moment += turn_error * 0.5 - self.angle_moment * 0.1  # tune this multiplier
     def get_nearest_grav_object(self):
         try:
             nearest = min((p for p in active_object if isinstance(p, GravityObject) and not p is self), 
@@ -857,10 +857,10 @@ def main():
      for i in range(3):
          pos = (random.uniform(100, 400), i * 200)
          active_object.append(Target(pos, size=1.5))
-     
-     if not debug_freecam:
-         active_object.add(player)
      '''
+    if not debug_freecam:
+         active_object.add(player)
+     
     active_object.add(BaseEnemy(pos = (800,0)))
     active_object.add(DebugMass())
     while True: 
@@ -935,7 +935,7 @@ try:
     debug = True
     debug_player = True
     debug_planet = True
-    debug_freecam = True
+    debug_freecam = False
     debug_disable_world_gen = True
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
