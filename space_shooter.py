@@ -419,7 +419,8 @@ class ChunkManager:
             for element in self.all_chunks[chunk]:
                 active_object.add(element)
         except:
-            self.generate_chunk(chunk)
+            if not debug_disable_world_gen:
+                self.generate_chunk(chunk)
             self.all_chunks[chunk] = []
         
     def set_inactive(self,chunk):
@@ -595,43 +596,63 @@ class BaseEnemy(Spaceship):
         self.image= self.base_image
         self.target = None
         self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
+        self.nearest_grav = None
     def patrol(self):
-        self.vel *= 0.00001
+        
         self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
-        if self.force.magnitude_squared() > 100:
+        self.get_nearest_grav_object()
+        
+        if not self.vel == (0,0):
+            desired_heading = self.vel.normalize()
+        if self.force.magnitude_squared() > 200**2 and self.nearest_grav != None:
             desired_cw = self.force.rotate(90)
             desired_ccw = self.force.rotate(-90)
-            
+            print(self.nearest_grav)
             if self.vel.magnitude_squared() > 0:
                 desired_heading = desired_cw if abs(signed_angle_to(self.vel,desired_cw)) < abs(signed_angle_to(self.vel,desired_ccw)) else desired_ccw
             else:
                 desired_heading = desired_cw
             
-            turn_error = self.current_orientation.angle_to(desired_heading)
-            self.angle_moment += turn_error * 1  # tune this multiplier
+            
+            grav_acc = self.force.magnitude() / self.mass
+            r = (self.nearest_grav.pos - self.pos).magnitude()
+            target_speed = (grav_acc * r) ** 0.5
+            
             
             speed_along_heading = self.vel.dot(self.current_orientation)
             alignment = self.vel.normalize().dot(self.current_orientation) if self.vel.magnitude_squared() > 0 else 0
             
-            if speed_along_heading < 300 and alignment > 0.7:
-                #self.acc += self.current_orientation * 400
-                pass
-            if speed_along_heading > 800 and alignment > 0.7:
-               #self.acc -= self.current_orientation * 400
-               pass
+            if speed_along_heading < target_speed :
+                self.acc += self.current_orientation * 400
+                
+            if speed_along_heading > target_speed :
+               self.acc -= self.current_orientation * 400
+               
         elif self.vel.magnitude_squared() < 300**2:
-            #self.acc += self.current_orientation * 400
-            pass
+            self.acc += self.current_orientation * 400
+            
+        turn_error = signed_angle_to(desired_heading,self.current_orientation)
+        self.angle_moment += turn_error * 0.5 - self.angle_moment * 0.1  # tune this multiplier
+    def get_nearest_grav_object(self):
+        try:
+            nearest = min((p for p in active_object if isinstance(p, GravityObject) and not p is self), 
+                       key=lambda p: (p.pos - self.pos).magnitude_squared())
+            print(nearest)
+        except:nearest = None 
+        self.nearest_grav = nearest
+        return nearest
     def pre_update(self):
         super().pre_update()
         self.patrol()
         
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
-        super().__init__((50,50),mass = 300,image= pygame.Surface((20,20)).convert_alpha())
+        image = pygame.Surface((20,20))
+        pygame.draw.circle(image,'red',(10,10),10)
+        super().__init__((50,50),mass = 300,image=image .convert_alpha())
     def update(self):
         if pygame.mouse.get_pressed()[0]:
-            self.mass = 300
+            self.mass = 1000
             mouse_screen = pygame.Vector2(pygame.mouse.get_pos())
             # convert screen pixels to pre_screen coordinates
             mouse_pre = mouse_screen / camera.scaler
@@ -641,6 +662,7 @@ class DebugMass(PhysicsObject,VisualObject):
             self.vel = pygame.Vector2(0)
         else:
             self.mass = 0.01
+            self.vel = pygame.Vector2(0)
         super().update()
                    
     
@@ -699,7 +721,7 @@ def simpel_planet_spawn(pos,vel= None):
     vel = vel or pygame.Vector2(random.uniform(-200, 200),random.uniform(-200, 200))
     density = 2.5
     
-    active_object.add(Planet(pos,vel,random_planet_type(),density,size=random.uniform(0.1,1.5)))
+    active_object.add(Planet(pos,vel,random_planet_type(),density,size=random.uniform(1,1.5)))
 
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
@@ -849,11 +871,16 @@ def main():
                 exit()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
-                    prefab_moon_system(camera.pos)
+                    simpel_planet_spawn(player.pos,vel = (0,0))
                 if event.key == pygame.K_p:
                     prefab_binary_planet(camera.pos)
                 if event.key == pygame.K_o:
                     simpel_planet_spawn(camera.pos,vel=(0,0))
+                if debug_freecam:
+                    if event.key == pygame.K_q:
+                        camera.zoom(camera.zoom_level *1.1)
+                    if event.key == pygame.K_e:
+                        camera.zoom(camera.zoom_level*0.9)
         
         #update world gen
         chunkmanager.update()
