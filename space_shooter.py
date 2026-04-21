@@ -19,10 +19,12 @@ class BasicObject():
     def pre_update(self):
         pass # idem, deze methode wordt aangeroepen voor update()
     def kys(self):
-        if isinstance(self, Player):
-            raise Exception()
+        
         try:
             active_object.remove(self)
+        except:
+            pass
+        try:
             bullets.remove(self)
         except:
             pass
@@ -100,9 +102,20 @@ class GravityObject(BasicObject):
         
     def get_total_gravity(self):
         # Som van alle gravitatiekrachten van elk object
+        is_enemy = isinstance(self, BaseEnemy)
+        if is_enemy:
+            strongest_grav = 0
+            strongest_grav_source = None
         force = pygame.Vector2(0)
         for object in active_object: #active_object is a global
-            force += self.get_grav(object) or (0,0)
+            grav =  self.get_grav(object) or (0,0)
+            if is_enemy:
+                grav_mag = grav[0] ** 2 + grav[1] ** 2
+                if  grav_mag > strongest_grav:
+                    strongest_grav = grav_mag
+                    strongest_grav_source = object
+            force += grav
+        if is_enemy:self.strongest_grav = strongest_grav_source
         return force
 
     def pre_update(self):
@@ -495,21 +508,7 @@ class Planet(PhysicsObject,VisualObject):
             raise ValueError(f'style:{style} is not supported')
         image = pygame.image.load(path).convert_alpha()
         image = pygame.transform.rotozoom(image, 0, size)
-        return image
-
-    def resolve_collisions(self):
-        # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
-        for sprite in active_object:
-            if id(sprite)< id(self) and self.hit(sprite):
-                if isinstance(sprite, Planet):
-                    self.elastic_collision(sprite,energy_dis= 0.9)
-              
-    def pre_update(self):
-        if isinstance(self,MovingObject):
-            self.resolve_collisions()
-        super().pre_update()
-    def update(self):
-        super().update()       
+        return image     
 
     def resolve_collisions(self):
         # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
@@ -596,51 +595,55 @@ class BaseEnemy(Spaceship):
         self.image= self.base_image
         self.target = None
         self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
-        self.nearest_grav = None
+        self.strongest_grav = None
     def patrol(self):
-        
         self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
-        self.get_nearest_grav_object()
         desired_heading = None
         if not self.vel == (0,0):
             desired_heading = self.vel.normalize()
-        if self.force.magnitude_squared() > 200**2 and self.nearest_grav != None:
-            desired_cw = self.force.rotate(90)
-            desired_ccw = self.force.rotate(-90)
-            print(self.nearest_grav)
-            if self.vel.magnitude_squared() > 0:
-                desired_heading = desired_cw if abs(signed_angle_to(self.vel,desired_cw)) < abs(signed_angle_to(self.vel,desired_ccw)) else desired_ccw
-            else:
-                desired_heading = desired_cw
-            
-            
-            grav_acc = self.force.magnitude() / self.mass
-            r = (self.nearest_grav.pos - self.pos).magnitude()
-            target_speed = (grav_acc * r) ** 0.5
-            
-            
-            speed_along_heading = self.vel.dot(self.current_orientation)
-            alignment = self.vel.normalize().dot(self.current_orientation) if self.vel.magnitude_squared() > 0 else 0
-            
-            if speed_along_heading < target_speed :
+        print(self.force.magnitude())
+        if self.force.magnitude_squared() > 3000**2 and self.strongest_grav != None:
+            print('orbiting')
+            self.orbit(self.strongest_grav)
+        elif self.force.magnitude_squared() > 1000**2 and self.strongest_grav != None:
+            print('approaching')
+            self.navigate_to(self.strongest_grav.pos)    
+        else:
+            print('drifting')
+            self.turn(desired_heading)
+            if self.vel.magnitude_squared() < 250**2:
                 self.acc += self.current_orientation * 400
-                
-            if speed_along_heading > target_speed :
-               self.acc -= self.current_orientation * 400
-               
-        elif self.vel.magnitude_squared() < 300**2:
+    def navigate_to(self, pos):
+        desired_heading = (pos-self.pos).normalize()
+        self.turn(desired_heading)
+        if self.current_orientation * desired_heading > 0.4:
             self.acc += self.current_orientation * 400
+        if self.current_orientation * desired_heading < -0.5:
+            self.acc -= self.current_orientation * 400
+    def turn(self,desired_heading:'Normalized Vector2'= None):
         if not desired_heading == None:
             turn_error = signed_angle_to(desired_heading,self.current_orientation)
             self.angle_moment += turn_error * 0.5 - self.angle_moment * 0.1  # tune this multiplier
-    def get_nearest_grav_object(self):
-        try:
-            nearest = min((p for p in active_object if isinstance(p, GravityObject) and not p is self), 
-                       key=lambda p: (p.pos - self.pos).magnitude_squared())
-            print(nearest)
-        except:nearest = None 
-        self.nearest_grav = nearest
-        return nearest
+    def orbit(self,target):
+        desired_cw = self.force.rotate(90)
+        desired_ccw = self.force.rotate(-90)
+        if self.vel.magnitude_squared() > 0:
+            desired_heading = desired_cw if abs(signed_angle_to(self.vel,desired_cw)) < abs(signed_angle_to(self.vel,desired_ccw)) else desired_ccw
+        else:
+            desired_heading = desired_cw
+
+        grav_acc = self.force.magnitude() / self.mass
+        r = (target.pos - self.pos).magnitude()
+        target_speed = 1.5*(grav_acc * r) ** 0.5
+        speed_along_heading = self.vel.dot(self.current_orientation)
+        self.turn(desired_heading)
+        if speed_along_heading < target_speed :
+            self.acc += self.current_orientation * 400
+            
+        if speed_along_heading > target_speed :
+           self.acc -= self.current_orientation * 400
+        
+    
     def pre_update(self):
         super().pre_update()
         self.patrol()
@@ -932,11 +935,11 @@ try:
     true_width = 4000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = True
+    debug = False
     debug_player = True
     debug_planet = True
     debug_freecam = False
-    debug_disable_world_gen = True
+    debug_disable_world_gen = False
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
