@@ -690,6 +690,7 @@ class Enemy2(BaseEnemy):
     damage       = 40
     spawn_weight = 1   # spawnt het minst vaak
 
+# Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
 all_enemy_types = [BaseEnemy, Enemy1, Enemy2]    
 
 class DebugMass(PhysicsObject,VisualObject):
@@ -994,6 +995,7 @@ try:
     height = int(info.current_h * 0.9)  # 90% of screen height
 
 
+    true_width = 2000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
     debug = True
