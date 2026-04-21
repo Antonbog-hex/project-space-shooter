@@ -336,13 +336,25 @@ class Camera(BasicObject):
         for pos in player.position_estimation:
             pygame.draw.circle(self.pre_screen, 'white', pos - self.pos + self.offset , 4)
         
-    def draw(self,group):
-        # Tekent alle objecten in de groep op het scherm
-        if not hasattr(group,'__iter__'): # catches when attempting to draw a single object
+    def draw(self, group):
+        if not hasattr(group, '__iter__'):
             group = [group]
         for sprite in group:
             pos = sprite.get_frame_pos() - self.pos + self.offset
-            self.pre_screen.blit(sprite.image,pos)
+            self.pre_screen.blit(sprite.image, pos)
+    
+            if isinstance(sprite, BaseEnemy):
+                bar_width  = 40
+                bar_height = 5
+                center_pos = sprite.pos - self.pos + self.offset
+    
+                bg_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, bar_width, bar_height)
+                pygame.draw.rect(self.pre_screen, (150, 0, 0), bg_rect)
+    
+                hp_fraction = sprite.hp / sprite.max_hp
+                hp_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, int(bar_width * hp_fraction), bar_height)
+                pygame.draw.rect(self.pre_screen, (0, 200, 0), hp_rect)
+        
 
     def finalise(self):
         # Schaal de pre_screen naar het echte venster en toon hem
@@ -589,16 +601,34 @@ class Player(Spaceship):
         bullets.add(new_bullet)
     
         self.shoot_cooldown = 15   # wacht 15 frames (= 0.25s) voor volgende schot
+
 class BaseEnemy(Spaceship):
+    # Dit is een basis vijand, alle andere vijanden erven hiervan
+    # Verander deze waarden in de subklassen om een ander type vijand te maken
+    
+    hp           = 1      # huidige levens (wordt per instantie bijgehouden)
+    max_hp       = 1      # maximale levens
+    speed        = 400    # snelheid bij patrouilleren
+    damage       = 10     # schade aan speler (Nog te programmeren)
+    spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt
+    image_path = 'graphics/enemies/enemy_1.png' 
+    
     def __init__(self,pos,vel=0,angle=0,**kwargs):
-        super().__init__(image = 'graphics/enemies/enemy_1.png',vel=vel,pos=pos,angle=angle,**kwargs)
+        super().__init__(image = self.__class__.image_path, vel=vel, pos=pos, angle = angle, **kwargs)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image= self.base_image
         self.target = None
         self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
         self.nearest_grav = None
+        self.hp     = self.__class__.hp
+        self.max_hp = self.__class__.max_hp
+    
+    def take_damage(self, amount=1):
+        self.hp -= amount
+        if self.hp <= 0:
+            self.kys()
+
     def patrol(self):
-        
         self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
         self.get_nearest_grav_object()
         desired_heading = None
@@ -613,11 +643,9 @@ class BaseEnemy(Spaceship):
             else:
                 desired_heading = desired_cw
             
-            
             grav_acc = self.force.magnitude() / self.mass
             r = (self.nearest_grav.pos - self.pos).magnitude()
             target_speed = (grav_acc * r) ** 0.5
-            
             
             speed_along_heading = self.vel.dot(self.current_orientation)
             alignment = self.vel.normalize().dot(self.current_orientation) if self.vel.magnitude_squared() > 0 else 0
@@ -641,10 +669,29 @@ class BaseEnemy(Spaceship):
         except:nearest = None 
         self.nearest_grav = nearest
         return nearest
+   
     def pre_update(self):
         super().pre_update()
         self.patrol()
-        
+
+class Enemy1(BaseEnemy):
+    # Snel maar lage hp
+    hp           = 3
+    max_hp       = 3
+    speed        = 600
+    damage       = 20
+    spawn_weight = 2   # spawnt vaker dan EnemyBrute
+
+class Enemy2(BaseEnemy):
+    # Traag maar hoge hp
+    hp           = 8
+    max_hp       = 8
+    speed        = 180
+    damage       = 40
+    spawn_weight = 1   # spawnt het minst vaak
+
+all_enemy_types = [BaseEnemy, Enemy1, Enemy2]    
+
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
         image = pygame.Surface((20,20))
@@ -688,6 +735,9 @@ class Bullet(PhysicsObject, VisualObject):
                 elif isinstance(obj, Target):
                     obj.kys()
                     self.kys()
+                elif isinstance(obj, BaseEnemy):
+                    obj.take_damage(1)
+                    self.kys()
                 
     def update(self):
         self.lifetime += 1
@@ -725,6 +775,7 @@ def simpel_planet_spawn(pos,vel= None):
 
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
+
 def signed_angle_to(v1, v2):
     # cross product gives sin of angle, dot gives cos
     cross = v1.x * v2.y - v1.y * v2.x
@@ -840,6 +891,22 @@ def prefab_satellite_network(pos):
         spawned.append(sat)
     return spawned
 
+def prefab_enemy_patrol(pos):
+    # Kies een willekeurig vijandtype, waarbij spawn_weight bepaalt hoe vaak elk type gekozen wordt
+    types   = all_enemy_types
+    weights = [t.spawn_weight for t in types]
+    chosen  = random.choices(types, weights=weights, k=1)[0]
+
+    # Spawn 2 tot 4 vijanden van hetzelfde type, verspreid rond het middelpunt
+    spawned = []
+    count = random.randint(2, 4)
+    for i in range(count):
+        offset = pygame.Vector2(random.uniform(-300, 300), random.uniform(-300, 300))
+        enemy = chosen(pos=pos + offset)
+        active_object.add(enemy)
+        spawned.append(enemy)
+    return spawned
+
 all_prefabs = {
     'binary':     prefab_binary_planet,
     'moon':       prefab_moon_system,
@@ -848,6 +915,7 @@ all_prefabs = {
     'triple':     prefab_triple_star,
     'ringed':     prefab_ringed_planet,
     'satellite':  prefab_satellite_network,
+    'enemies':    prefab_enemy_patrol,
 }
 #%% Main function
 
@@ -867,8 +935,8 @@ def main():
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                pygame.quit()
-                exit()
+                raise SystemExit #fix voor macOS
+            
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
                     simpel_planet_spawn(player.pos,vel = (0,0))
@@ -885,12 +953,9 @@ def main():
         #update world gen
         chunkmanager.update()
         
-        
-        
         # Beweeg alle objecten
         active_object.update()
         bullets.update()
-
         
         # Beweeg de camera
         if debug_freecam:
@@ -929,14 +994,13 @@ try:
     height = int(info.current_h * 0.9)  # 90% of screen height
 
 
-    true_width = 4000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
     debug = True
     debug_player = True
     debug_planet = True
     debug_freecam = False
-    debug_disable_world_gen = True
+    debug_disable_world_gen = False
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
@@ -948,6 +1012,10 @@ try:
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
     
     main()
+
+# Fix voor MacOS
+except SystemExit:
+    pass
 except:
     traceback.print_exc()
 finally:
