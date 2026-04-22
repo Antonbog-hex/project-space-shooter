@@ -234,9 +234,6 @@ class ActiveObjects(list):
         for e in self:
             e.update() # the action (eg. movement)
 
-    
-
-
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
     def __init__(self,screen):
@@ -538,67 +535,6 @@ class Planet(PhysicsObject,VisualObject):
     def update(self):
         
         super().update()   
-class Player(Spaceship):
-    # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
-    def __init__(self, pos, vel, angle):
-        self.shoot_cooldown = 0
-        super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle)
-        self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
-        self.image = self.base_image
-    
-    def input_check(self):
-        # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
-            a = pygame.math.Vector2()
-            a.from_polar((400, -self.angle))
-            if self.vel.dot(a) > 0:                            # check if  the force attempts increase in vel
-                vel_norm = self.vel.normalize()
-                a_parallel = vel_norm * a.dot(vel_norm)        # component along velocity
-                a_perp = a - a_parallel                        # component perpendicular to velocity
-                
-                speed = self.vel.magnitude()
-                dampen = 1 / (1 + speed * 0.01)
-                self.acc += a_parallel * dampen + a_perp # only dampen parallel part
-            else:
-                self.acc += a
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.angle_moment += 20
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.angle_moment += -20
-        if keys[pygame.K_SPACE]:
-            self.shoot()
-        
-    
-    def update(self):
-        if not debug_freecam: self.input_check()
-        self.pos_estimation_update()
-        super().update()
-        if self.shoot_cooldown > 0:
-            self.shoot_cooldown -= 1
-        
-        
-   
-    def shoot(self):
-        # Vuurt een kogel af in de richting die het schip op wijst.
-        if self.shoot_cooldown > 0:
-            return   # nog niet klaar: wacht
-    
-        # Bereken de richting (vector) van de neus van het schip
-        direction = pygame.math.Vector2()
-        direction.from_polar((1, -self.angle))   # eenheidsvector in schiprichting
-    
-        bullet_speed = 800   # hoe snel de kogel vliegt (pixels/seconde)
-    
-        # Startpositie: iets voor de neus van het schip, zodat hij niet meteen zichzelf raakt
-        spawn_pos = self.pos + direction * (self.hitbox_radius + 10)
-    
-        # Snelheid van kogel = schipsnelheid + eigen snelheid in schiprichting
-        bullet_vel = self.vel + direction * bullet_speed
-    
-        new_bullet = Bullet(pos=spawn_pos, vel=bullet_vel)
-        bullets.add(new_bullet)
-    
         self.shoot_cooldown = 15   # wacht 15 frames (= 0.25s) voor volgende schot
 
 class BaseEnemy(Spaceship):
@@ -661,14 +597,6 @@ class BaseEnemy(Spaceship):
         if not desired_heading == None:
             turn_error = signed_angle_to(desired_heading,self.current_orientation)
             self.angle_moment += turn_error * 0.5 - self.angle_moment * 0.1  # tune this multiplier
-    def get_nearest_grav_object(self):
-        try:
-            nearest = min((p for p in active_object if isinstance(p, GravityObject) and not p is self), 
-                       key=lambda p: (p.pos - self.pos).magnitude_squared())
-            print(nearest)
-        except:nearest = None 
-        self.nearest_grav = nearest
-        return nearest
     def pre_update(self):
         super().pre_update()
         self.patrol()
@@ -834,7 +762,6 @@ def prefab_moon_system(pos, moon_count=None):
         spawned.append(moon)
     return spawned
 
-
 def prefab_asteroid_field(pos, count=None):
     count = count or random.randint(6, 12)
     spawned = []
@@ -845,7 +772,6 @@ def prefab_asteroid_field(pos, count=None):
         active_object.add(asteroid)
         spawned.append(asteroid)
     return spawned
-
 
 def prefab_black_hole(pos):
     bh = Planet(pos, (0, 0), 'black_hole', density=50, size=0.6)
@@ -992,8 +918,6 @@ try:
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)   # 90% of screen width
     height = int(info.current_h * 0.9)  # 90% of screen height
-
-
     true_width = 2000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
@@ -1010,10 +934,8 @@ try:
     grav_cte = 6000
     active_object = ActiveObjects()
     bullets = ActiveObjects()
-    chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
-    
+    chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (4000,4000))
     main()
-
 # Fix voor MacOS
 except SystemExit:
     pass
