@@ -2,7 +2,7 @@ import pygame
 import traceback
 import random
 import math
-from sys import exit
+
 
 # Klassen
 # %% basic classes
@@ -336,8 +336,10 @@ class Camera(BasicObject):
             if isinstance(sprite, Target):
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, BaseEnemy):
-                pygame.draw.line(self.pre_screen,'white',pos,pos + pygame.Vector2.from_polar((20,-sprite.angle)))
+                pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 100)
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
+                if sprite.desired_heading != None:
+                    pygame.draw.line(camera.pre_screen, 'purple', pos, pos + sprite.desired_heading.normalize() * 100)
                 
             if isinstance(sprite, Player) and debug_player:
                 pygame.draw.circle(self.pre_screen, 'blue', pos, sprite.hitbox_radius,width = 1)
@@ -607,7 +609,7 @@ class BaseEnemy(Spaceship):
     
     hp           = 1      # huidige levens (wordt per instantie bijgehouden)
     max_hp       = 1      # maximale levens
-    speed        = 400    # snelheid bij patrouilleren
+    speed        = 300    # snelheid bij patrouilleren
     damage       = 10     # schade aan speler (Nog te programmeren)
     spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt
     image_path = 'graphics/enemies/enemy_1.png' 
@@ -617,62 +619,118 @@ class BaseEnemy(Spaceship):
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image= self.base_image
         self.target = None
-        self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
-        self.nearest_grav = None
+        self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
+        self.strongest_grav = None
+        self.speed = self.__class__.speed
         self.hp     = self.__class__.hp
         self.max_hp = self.__class__.max_hp
-    
+        self.longer_target = None
+        self.ticker = 0
+        self.desired_heading = None
     def take_damage(self, amount=1):
         self.hp -= amount
         if self.hp <= 0:
             self.kys()
-
+    
+    def accelerate(self):
+        self.acc += self.current_heading * self.speed
+    def decelerate(self):
+        self.acc -= self.current_heading * self.speed * 0.5
+    def turn_to(self,heading):
+        turn_error = signed_angle_to( self.current_heading, heading)
+        self.angle_moment += turn_error * 1.5 - self.angle_moment * 0.2  # tune this multiplier
+        
+    def orientation_update(self):
+        self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
+    def navigate_to_point(self,point:pygame.Vector2,for_frames = 1):
+        if debug_enemy: print(f'navigating_to {str(point)}')
+        print(f'ticker {self.ticker}')
+        if point == self.pos: return
+        if for_frames > 1: 
+            self.longer_target = point
+            self.ticker = for_frames
+        if self.ticker == 0: self.longer_target = None
+        desired_heading = (point - self.pos).normalize()
+        self.desired_heading =desired_heading
+        self.turn_to(desired_heading)
+        if self.current_heading * desired_heading > 0.5 and self.vel* desired_heading < 300:
+            self.accelerate()
+    def drift(self):
+        if debug_enemy: print('drifting')
+        self.turn_to(self.vel)
+        if self.vel.magnitude_squared() > 400 **2:
+            self.decelerate()
+        elif self.vel.magnitude_squared() < 200 ** 2:
+            self.accelerate()
+    def orbit(self,object):
+        if  debug_enemy: print('orbiting')
+        desired_cw = self.force.rotate(90)
+        desired_ccw = self.force.rotate(-90)
+        if self.vel.magnitude_squared() > 0:
+            desired_heading = desired_cw if abs(signed_angle_to(self.vel,desired_cw)) < abs(signed_angle_to(self.vel,desired_ccw)) else desired_ccw
+        else:
+            desired_heading = desired_cw 
+        self.desired_heading = desired_heading
+        grav_acc = self.force.magnitude() / self.mass
+        r = (self.strongest_grav.pos - self.pos).magnitude()
+        target_speed = 1.1*(grav_acc * r) ** 0.5
+        speed_along_heading = self.vel.dot(self.current_heading)
+        self.turn_to(desired_heading)
+        if speed_along_heading < target_speed :
+            self.accelerate()
+        if speed_along_heading > target_speed :
+           self.decelerate()
+    def swerve(self,danger_object):
+        if debug_enemy: print('swerving')
+        delta = (danger_object.pos- self.pos).normalize()
+        desired_cw = delta.rotate(90)
+        desired_ccw = delta.rotate(-90)
+        print(delta,desired_ccw,desired_cw)
+        if self.current_heading * desired_cw >  self.current_heading * desired_ccw: #uses inproduct as a metric of alignedness
+            desired_heading = desired_cw
+            print('cw')
+        else:
+            desired_heading = desired_ccw
+            print('ccw')
+        self.desired_heading = desired_heading
+        self.turn_to(desired_heading)
+        if self.current_heading * delta > 0:
+            self.decelerate()
+        else:
+           self.accelerate()
+            
+    def resolve_ticker(self):
+        print(f'ticker {self.ticker}')
+        self.ticker -= 1
+        if self.longer_target != None:
+            self.navigate_to_point(self.longer_target)
     def patrol(self):
-        self.current_orientation = pygame.Vector2.from_polar((1, -self.angle))
-        desired_heading = None
-        if not self.vel == (0,0):
-            desired_heading = self.vel.normalize()
-        if self.force.magnitude_squared() > 200**2 and self.nearest_grav != None:
-            desired_cw = self.force.rotate(90)
-            desired_ccw = self.force.rotate(-90)
-            print(self.nearest_grav)
-            if self.vel.magnitude_squared() > 0:
-                desired_heading = desired_cw if abs(signed_angle_to(self.vel,desired_cw)) < abs(signed_angle_to(self.vel,desired_ccw)) else desired_ccw
-            else:
-                desired_heading = desired_cw
+        print(self.force.magnitude())
+        if self.force.magnitude_squared() > 4000**2 and self.strongest_grav != None:
+            self.orbit(self.strongest_grav)
+        elif self.force.magnitude_squared() > 1500**2 and self.strongest_grav != None:
+            self.navigate_to_point(self.strongest_grav.pos)
+        else:
+            self.drift()
+    def angle_dampen(self):
+        pass           
+    
             
-            
-            grav_acc = self.force.magnitude() / self.mass
-            r = (self.nearest_grav.pos - self.pos).magnitude()
-            target_speed = (grav_acc * r) ** 0.5
-            
-            
-            speed_along_heading = self.vel.dot(self.current_orientation)
-            alignment = self.vel.normalize().dot(self.current_orientation) if self.vel.magnitude_squared() > 0 else 0
-            
-            if speed_along_heading < target_speed :
-                self.acc += self.current_orientation * 400
-                
-            if speed_along_heading > target_speed :
-               self.acc -= self.current_orientation * 400
-               
-        elif self.vel.magnitude_squared() < 300**2:
-            self.acc += self.current_orientation * 400
-        if not desired_heading == None:
-            turn_error = signed_angle_to(desired_heading,self.current_orientation)
-            self.angle_moment += turn_error * 0.5 - self.angle_moment * 0.1  # tune this multiplier
-    def get_nearest_grav_object(self):
-        try:
-            nearest = min((p for p in active_object if isinstance(p, GravityObject) and not p is self), 
-                       key=lambda p: (p.pos - self.pos).magnitude_squared())
-            print(nearest)
-        except:nearest = None 
-        self.nearest_grav = nearest
-        return nearest
+    
     def pre_update(self):
         super().pre_update()
-        self.patrol()
-
+        self.orientation_update()
+        
+        
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_l]:
+            self.swerve(debug_mass)
+        else:
+            if self.ticker > 0:
+                self.resolve_ticker()   
+            else:
+                self.patrol()
+            #self.turn_to()
 class Enemy1(BaseEnemy):
     # Snel maar lage hp
     hp           = 3
@@ -778,7 +836,7 @@ def random_planet_type():
 
 def signed_angle_to(v1, v2):
     # cross product gives sin of angle, dot gives cos
-    cross = v1.x * v2.y - v1.y * v2.x
+    cross = -(v1.x * v2.y - v1.y * v2.x) # negation to fix weirdness with pygames inverted y
     dot = v1.dot(v2)
     return math.degrees(math.atan2(cross, dot))
 #%% Prefabs
@@ -929,12 +987,16 @@ def main():
     if not debug_freecam:
          active_object.add(player)
      
-    active_object.add(BaseEnemy(pos = (800,0)))
-    active_object.add(DebugMass())
+# %%
+    debug_enemy = BaseEnemy(pos = (800,0), angle = 180)
+    active_object.add(debug_enemy)
+
+    active_object.add(debug_mass)
     while True: 
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                pygame.quit()
                 raise SystemExit #fix voor macOS
             
             if event.type == pygame.KEYDOWN:
@@ -976,13 +1038,7 @@ def main():
         #print(clock.get_fps())
         pygame.display.update()
         clock.tick(fps)
-        '''
-        for obj in active_object:
-            print(type(obj),obj.vel.magnitude())
-            for otherobj in active_object:
-                if id(otherobj) > id(obj):
-                    print((obj.pos - otherobj.pos).magnitude())
-        '''
+        
 
 #%% actually what runs 
 # try-except prevents kernel crash in case of bug, because pygame needs to quit proper 
@@ -990,8 +1046,8 @@ pygame.init()
 try:
     random.seed(1234)
     info = pygame.display.Info()
-    width = int(info.current_w * 0.9)   # 90% of screen width
-    height = int(info.current_h * 0.9)  # 90% of screen height
+    width = int(info.current_w * 0.5)   # 90% of screen width
+    height = int(info.current_h * 0.5)  # 90% of screen height
 
 
     true_width = 2000 # change to alter game size
@@ -1000,8 +1056,9 @@ try:
     debug = False
     debug_player = True
     debug_planet = True
-    debug_freecam = False
-    debug_disable_world_gen = False
+    debug_freecam = True
+    debug_disable_world_gen = True
+    debug_enemy = True
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
@@ -1011,7 +1068,7 @@ try:
     active_object = ActiveObjects()
     bullets = ActiveObjects()
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
-    
+    debug_mass = DebugMass()
     main()
 
 # Fix voor MacOS
