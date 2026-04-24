@@ -152,7 +152,43 @@ class Hitbox(BasicObject):
     
     def hit(self,other: 'Hitbox') -> bool:
         pass
+class LineHitbox(BasicObject):
+    def __init__(self,start_pos:pygame.Vector2,end_pos:pygame.Vector2,**kwargs):
+        super.__init__(pos=start_pos,**kwargs)
+        self.end = end_pos
+        self.minx = min(self.pos.x,self.end.x)
+        self.miny = min(self.pos.y,self.end.y)
+        self.maxx = max(self.pos.x,self.end.x)
+        self.maxy = max(self.pos.y,self.end.y)
+    def hit(self,other):
+        if isinstance(other, LineHitbox):
+            # bounding box check first (cheap)
+            if self.minx > other.maxx or self.maxx < other.minx:
+                return False
+            if self.miny > other.maxy or self.maxy < other.miny:
+                return False
 
+            # cross product straddle check
+            d1 = self.end - self.pos
+            d2 = other.end - other.pos
+            
+            def cross2d(a, b):
+                return a.x * b.y - a.y * b.x
+            
+            denom = cross2d(d1, d2)
+            if denom == 0:
+                return False  # parallel
+            
+            t = cross2d(other.pos - self.pos, d2) / denom
+            u = cross2d(other.pos - self.pos, d1) / denom
+            # intersection happens at self.pos + d1 * t or other.pos + d2 * u
+            return 0 <= t <= 1 and 0 <= u <= 1
+        if isinstance(other, CircularHitbox):
+            d = self.end - self.pos
+            t = (other.pos - self.pos).dot(d) / d.dot(d)
+            t = max(0.0, min(1.0, t))
+            closest = self.pos + d * t
+            return (closest - other.pos).magnitude_squared() <= other.hitbox_radius ** 2
 class CircularHitbox(Hitbox):
     # Ronde hitbox: botst als de afstand kleiner is dan de som van de radiussen
     def __init__(self,radius,**kwargs):
@@ -162,6 +198,8 @@ class CircularHitbox(Hitbox):
     def hit(self,other)-> bool:
         if isinstance(other, CircularHitbox):
             return (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius)**2 
+        if isinstance(other, LineHitbox):
+            return other.hit(self)
 # %% combined classes
 class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
     # Combineert zwaartekracht + beweging + botsingsdetectie. Dit is de basis voor planeten en spaceships.
@@ -250,7 +288,7 @@ class Camera(BasicObject):
         self.background_pos = pygame.Vector2((0,0))
         
         self.zoom_level = 1.0
-        self.min_zoom = 3
+        self.min_zoom = 2
         self.max_zoom = 1
         self._rebuild_pre_screen()
     def _rebuild_pre_screen(self):
@@ -986,8 +1024,6 @@ def main():
      '''
     if not debug_freecam:
          active_object.add(player)
-     
-# %%
     debug_enemy = BaseEnemy(pos = (800,0), angle = 180)
     active_object.add(debug_enemy)
 
@@ -1050,14 +1086,14 @@ try:
     height = int(info.current_h * 0.5)  # 90% of screen height
 
 
-    true_width = 2000 # change to alter game size
+    true_width = 3000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
     debug = False
     debug_player = True
     debug_planet = True
-    debug_freecam = True
-    debug_disable_world_gen = True
+    debug_freecam = False
+    debug_disable_world_gen = False
     debug_enemy = True
     player = Player((0,0), (0,0), 0)
     camera = Camera(screen)
