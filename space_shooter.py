@@ -209,7 +209,7 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
     def __init__(self, pos,vel = 0, force = 0, mass = 20, hitbox_radius = 20, **kwargs):
         super().__init__(pos=pos,vel=vel, mass=mass, radius = hitbox_radius, **kwargs)
 
-    def elastic_collision(self, other,energy_dis = 1):
+    def elastic_collision(self, other,energy_dis = 1, reflective = True):
          """
         Verwerkt een elastische botsing tussen dit object en "other".
         energy_dis < 1 = energie gaat verloren (inelastisch)
@@ -238,7 +238,7 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
          self.vel -= impulse * other.mass * normal
          self.pos += normal*0.51*overlap
 
-         if isinstance(other,MovingObject):
+         if isinstance(other,MovingObject) and reflective:
              other.vel += impulse * self.mass * normal
              other.pos -= normal*0.51*overlap       
     def pre_update(self):
@@ -258,7 +258,12 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
                 
 class Predictor(PhysicsObject):
     def pre_update(self):
-        GravityObject.pre_update(self)           
+        GravityObject.pre_update(self)
+    def update(self):
+        for obj in active_object:
+            if self.hit(obj) and obj != player:
+                self.elastic_collision(obj,energy_dis=1.1,reflective=False)
+        super().update()
 
 class ActiveObjects(list):
     # Lijst van alle actieve PhysicsObjects. Roept elke frame pre_update() en update() aan op elk object.
@@ -274,16 +279,14 @@ class ActiveObjects(list):
             e.pre_update() # calculates without action (eg. gravity)
         for e in self:
             e.update() # the action (eg. movement)
-
-    
-
-
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
+    max_width = 5000 # the max width to zoom out to
+    min_width = 1000 # the min width to zoom into
     def __init__(self,screen):
         super().__init__()
         
-        self.final_screen = screen
+        self.final_screen = screen # what actually gets shown
         
         #achtergrond
         self.background_surf = pygame.image.load('graphics/background/Starfield_05-1024x1024.png').convert()
@@ -291,13 +294,13 @@ class Camera(BasicObject):
         self.background_pos = pygame.Vector2((0,0))
         
         self.zoom_level = 1.0
-        self.min_zoom = 2
-        self.max_zoom = 1
+        self.min_zoom = __class__.min_width / true_width
+        self.max_zoom = __class__.max_width / true_width
         self._rebuild_pre_screen()
     def _rebuild_pre_screen(self):
         # The pre_screen represents (true_width / zoom) world units
         # but is always rendered at the same pixel size
-        effective_width = true_width / self.zoom_level
+        effective_width = true_width * self.zoom_level
         effective_height = int(self.final_screen.get_height() / self.final_screen.get_width() * effective_width)
         self.pre_screen = pygame.Surface((int(effective_width), effective_height))
         self.scaler = self.final_screen.get_width() / effective_width
@@ -310,31 +313,22 @@ class Camera(BasicObject):
         self._rebuild_pre_screen()
     def track(self,target:'Player'):
         # Volg de speler vloeiend, kijk een beetje vooruit.
-        
-        
-        desired_pos = target.position_estimation[1]  # fallback to current pos
-        
-       
+   
+        desired_pos = target.position_estimation[1] if (target.position_estimation[1]-target.pos).magnitude_squared() < 500 ** 2 else target.pos # fallback to current pos
         # Smooth lerp toward desired position
         LERP_SPEED = 0.08  # 0 = staat stil, 1 = springt direct
-        
         delta = desired_pos - self.pos
-        
-        # Soft dead zone — scale down delta when close, don't hard-cut it
-        dist = delta.magnitude()
-        if dist > 0:
-            # Ease out: slow down as we approach target
-            
-            self.pos += delta * LERP_SPEED 
+        self.pos += delta * LERP_SPEED 
         
         
         last_pred = target.position_estimation[-1]
-        delta = (last_pred - self.pos).magnitude() + 100 
-        base_half_h = (self.final_screen.get_height() / self.final_screen.get_width() * true_width) / 2
+        desired_height = (last_pred - target.pos).magnitude() + 300 
+        base_half_h = self.final_screen.get_height() 
             
-        required_zoom = base_half_h / delta if delta > 0 else self.base_zoom
-        required_zoom = pygame.math.clamp(required_zoom, self.max_zoom, self.min_zoom)
-        self.zoom_level += (required_zoom - self.zoom_level) * 0.05
+        required_zoom =  desired_height/base_half_h if desired_height > 0 else self.base_zoom
+        if required_zoom > self.max_zoom: print('zoom ceiling')
+        required_zoom = pygame.math.clamp(required_zoom, self.min_zoom, self.max_zoom)
+        self.zoom_level += (required_zoom - self.zoom_level) * 0.05 # LERP zoom
         self._rebuild_pre_screen()
         
     def background_draw(self):
@@ -433,26 +427,66 @@ class Camera(BasicObject):
                 self.pos += (0,-0.05)
             if keys[pygame.K_DOWN]:
                 self.pos += (0,0.05)    
+class Bullet(PhysicsObject, VisualObject):
+# Een kogel die het schip afvuurt.
+    damage = 1
+    speed = 500
+    lifetime = 180
+    def __init__(self, pos, vel, source):
+        # Maak een klein oranje cirkeltje als afbeelding voor de kogel
+        bullet_surface = pygame.Surface((8, 8), pygame.SRCALPHA)
+        pygame.draw.circle(bullet_surface, (255, 180, 50), (4, 4), 4)
+        super().__init__(pos=pos, vel=vel, mass=1, hitbox_radius=4,image=bullet_surface)
+        self.source = source
+        self.lifetime = self.__class__.lifetime   # frames it lives
 
+    def check_collisions(self):
+        for obj in active_object:
+            if obj != self.source and self.hit(obj):
+                if isinstance(obj, Planet):
+                    self.kys()
+                elif isinstance(obj, Target):
+                    obj.kys()
+                    self.kys()
+                elif isinstance(obj, BaseEnemy):
+                    obj.take_damage(self.__class__.damage)
+                    self.kys()
+    def update(self):
+        self.lifetime -= 1
+        if self.lifetime <= 0:
+            self.kys()
+        self.check_collisions()
+        super().update()
+                
 class Spaceship(PhysicsObject,RotatingObject,VisualObject):
+    pos_estim_step_size = 20# number of frames that get predicted per step
+    max_hp = 1
+    bullet_type = Bullet
+    speed =  500
+    
     # Een ruimteschip: combineert physics, rotatie en een afbeelding. Berekent ook een voorspelde baan.
     def __init__(self, pos, vel, angle,image ,**kwargs):
         super().__init__(pos = pos,image = image ,vel = vel , mass = 100, angle = angle , hitbox_radius= 15, **kwargs)
-        self.position_estimation = []
-    
+        self.position_estimation = [self.pos for i in range(5)]
+        self.hp = self.__class__.max_hp
+        self.current_heading = pygame.Vector2.from_polar((1, -self.angle)) # direction of pointing normvector
+    def accelerate(self):
+        self.acc += self.current_heading * self.speed
+    def decelerate(self):
+        self.acc -= self.current_heading * self.speed * 0.5
     def pos_estimation_update(self,steps=5):
         # Simuleert de toekomstige baan door een kopie van het schip vooruit te bewegen zonder het echte schip aan te passen.
         active_object.remove(self)
         self.position_estimation.clear()
         tester = Predictor(pos = self.pos,vel= self.vel,force = self.force,mass=self.mass,hitbox_radius= self.hitbox_radius)
         for i in range(steps):
-            for i in range (32):
+            for i in range (__class__.pos_estim_step_size):
                 tester.pre_update()
                 tester.update()
             self.position_estimation.append(tester.pos)
         
         active_object.add(self)
-                
+               
     def collision_check(self):
         # Controleer of het schip een planeet raakt en stuit dan terug.
         for sprite in active_object:
@@ -461,11 +495,15 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
                     self.elastic_collision(sprite,energy_dis= 1.1)
                 if isinstance(sprite,Spaceship):
                     self.elastic_collision(sprite, energy_dis = 1.4)
+    def _orientation_update(self):
+        self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
     def update(self):
         self.angle_dampen()
         self.collision_check()
         super().update()
-        
+    def pre_update(self):
+        self._orientation_update()
+        super().pre_update()
 class ChunkManager:
     def __init__(self,chunk_size = (2000,2000),around_chunks = 1):
         self.chunk_size = chunk_size
@@ -596,18 +634,13 @@ class Player(Spaceship):
         # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP] or keys[pygame.K_w]:
-            a = pygame.math.Vector2()
-            a.from_polar((400, -self.angle))
-            if self.vel.dot(a) > 0:                            # check if  the force attempts increase in vel
-                vel_norm = self.vel.normalize()
-                a_parallel = vel_norm * a.dot(vel_norm)        # component along velocity
-                a_perp = a - a_parallel                        # component perpendicular to velocity
-                
-                speed = self.vel.magnitude()
-                dampen = 1 / (1 + speed * 0.01)
-                self.acc += a_parallel * dampen + a_perp # only dampen parallel part
+            
+            if self.vel * self.current_heading < 300:
+                self.accelerate()
             else:
-                self.acc += a
+                perp = self.vel.rotate(90).normalize()
+                self.acc += self.speed * (self.current_heading  * perp) * perp
+                
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             self.angle_moment += 20
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
@@ -648,51 +681,13 @@ class Player(Spaceship):
         bullets.add(new_bullet)
     
         self.shoot_cooldown = 15   # wacht 15 frames (= 0.25s) voor volgende schot
-class Bullet(PhysicsObject, VisualObject):
-# Een kogel die het schip afvuurt.
-
-    def __init__(self, pos, vel, source):
-        # Maak een klein oranje cirkeltje als afbeelding voor de kogel
-        bullet_surface = pygame.Surface((8, 8), pygame.SRCALPHA)
-        pygame.draw.circle(bullet_surface, (255, 180, 50), (4, 4), 4)
-
-        super().__init__(pos=pos, vel=vel, mass=1, hitbox_radius=4,image=bullet_surface)
-        self.source = source
-        self.max_lifetime = 180   # kogel leeft maximaal 180 frames
-        self.lifetime     = 0
-          
     
-    def check_collisions(self):
-        for obj in active_object:
-            if obj != self.source and self.hit(obj):
-                if isinstance(obj, Planet):
-                    self.kys()
-                elif isinstance(obj, Target):
-                    obj.kys()
-                    self.kys()
-                elif isinstance(obj, BaseEnemy):
-                    obj.take_damage(1)
-                    self.kys()
-                
-    def update(self):
-        self.lifetime += 1
-        if self.lifetime >= self.max_lifetime:
-            self.kys()
-        self.check_collisions()
-        super().update()
 class BaseEnemy(Spaceship):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
-    
-    hp           = 1      # huidige levens (wordt per instantie bijgehouden)
-    max_hp       = 1      # maximale levens
-    speed        = 300    # snelheid bij patrouilleren
-    damage       = 10     # schade aan speler (Nog te programmeren)
     spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt
-    bullet_speed = 300
     bullet_type = Bullet
     bullet_reload = 60 # ticks to reload
-    
     image_path = 'graphics/enemies/enemy_1.png' 
     
     def __init__(self,pos,vel=0,angle=0,**kwargs):
@@ -700,18 +695,14 @@ class BaseEnemy(Spaceship):
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image= self.base_image
         # movement
-        self.current_heading = pygame.Vector2.from_polar((1, -self.angle)) # direction of pointing normvector
+        
         self.strongest_grav = None # object that exerts strongest gravity (for orbiting)
         self.longer_target = None
-        self.ticker = 0 # ticker for longer duretion movement eg. swerve
+        self.ticker = 0 # ticker for longer duretion movement eg. swerve, navigate_to
         self.longer_heading = None # for long duration swerve
         self.longer_target = None # for long duration navigate_to
-        self.player_memory = 0 # ticker for remembering player
+        self.player_memory = 0 # ticker for remembering player 0 = forgotten
         self.desired_heading = None # this is for debug draw
-        # Boris' stuff
-        self.speed = self.__class__.speed
-        self.hp     = self.__class__.hp
-        self.max_hp = self.__class__.max_hp
         self.bullet_ticker = 0
         if debug_enemy:
             self.status= '' # string that states what enemies does this tick
@@ -719,17 +710,11 @@ class BaseEnemy(Spaceship):
     def take_damage(self, amount=1):
         self.hp -= amount
         if self.hp <= 0:
-            self.kys()
-    
-    def accelerate(self):
-        self.acc += self.current_heading * self.speed
-    def decelerate(self):
-        self.acc -= self.current_heading * self.speed * 0.5
+            self.kys()   
     def turn_to(self,heading):
         turn_error = signed_angle_to( self.current_heading, heading)
         self.angle_moment += turn_error * 2 - self.angle_moment * 0.1  # tune this multiplier      
-    def orientation_update(self):
-        self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
+    
     def navigate_to_point(self, point: pygame.Vector2, for_frames=1):
         # navigates to a certain point in world coord, for multible frames if desired
         if debug_enemy: self.status = 'navigating to a point'
@@ -839,10 +824,6 @@ class BaseEnemy(Spaceship):
             if isinstance(obj,Planet) and linetest.hit(obj):
                 return False
         return True
-    def kys(self):
-        # temporary debug overwrite
-        print('died')
-        super().kys()
     def resolve_ticker(self):
         
         if self.ticker == 0: return False
@@ -866,9 +847,8 @@ class BaseEnemy(Spaceship):
         if self.resolve_ticker():
             return
         if self.player_memory > 0:
-            pass
-            #self.player_interact()
-            #return
+            self.player_interact()
+            return
         if self.force.magnitude_squared() > 5000**2 and self.strongest_grav != None:
             self.orbit(self.strongest_grav)
             return
@@ -878,16 +858,36 @@ class BaseEnemy(Spaceship):
                 return
         self.drift()
     def player_interact(self):
-        if debug_enemy: self.status = 'Interacting with player'
-        self.navigate_to_point(player.pos)
+        if (self.pos - player.pos).magnitude_squared() > 500 ** 2: 
+            self.navigate_to_point(player.pos)
+        elif (self.vel - player.vel).magnitude_squared() > 150 ** 2:
+            self.match_vel(player)
+        if self.bullet_ticker < 30:
+            self.aim(player)
+            if self.bullet_ticker == 0: self.shoot()
     def shoot(self):
-        bullet = __class__.bullet_type(self.pos,self.vel + self.current_heading * __class__.bullet_speed,self)
-        bullets.add(bullet)
-        self.bullet_ticker = __class__.bullet_reload
-    
+        bullet = __class__.bullet_type(self.pos,self.vel + self.current_heading * self.__class__.bullet_type.speed,self)
+        bullets.add(bullet)      
+        self.bullet_ticker = self.__class__.bullet_reload
+    def aim(self,target):
+        self.turn_to(target.pos-self.pos)
+        # to be improved
+        '''
+        dist = (target.pos - self.pos).magnitude()
+        travel_time = dist/self.__class__.bullet_type.speed
+        predicted_pos = target.position_estimation[max(0,min(int(travel_time // Spaceship.pos_estim_step_size)-1,4))]
+        self.turn_to(predicted_pos -self.pos)
+        '''
+    def match_vel(self,target):
+        if debug_enemy: self.status = 'matching vel'
+        d_vel = target.vel - self.vel
+        if d_vel * self.current_heading > 0:
+            self.accelerate()
+        if d_vel * self.current_heading < 0:
+            self.decelerate()
+        self.turn_to(target.pos-self.pos)   
     def pre_update(self):
         super().pre_update()
-        self.orientation_update()
         keys = pygame.key.get_pressed()
         if keys[pygame.K_l]:
             if self.bullet_ticker == 0:
@@ -1194,8 +1194,8 @@ pygame.init()
 try:
     random.seed(1234)
     info = pygame.display.Info()
-    width = int(info.current_w * 0.5)   # 90% of screen width
-    height = int(info.current_h * 0.5)  # 90% of screen height
+    width = int(info.current_w * 0.9)   # 90% of screen width
+    height = int(info.current_h * 0.9)  # 90% of screen height
 
 
     true_width = 3000 # change to alter game size
