@@ -164,6 +164,7 @@ class LineHitbox(BasicObject):
         self.maxy = max(self.pos.y,self.end.y)
     def hit(self,other):
         if isinstance(other, LineHitbox):
+            #currenlty unused, may be faulthy
             # bounding box check first (cheap)
             if self.minx > other.maxx or self.maxx < other.minx:
                 return False
@@ -376,7 +377,9 @@ class Camera(BasicObject):
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
                 if sprite.desired_heading != None:
                     pygame.draw.line(camera.pre_screen, 'purple', pos, pos + sprite.desired_heading.normalize() * 100)
-                
+                if sprite.aim_target != None:
+                    target = sprite.aim_target - self.pos + self.offset
+                    pygame.draw.circle(self.pre_screen, 'magenta', target , 5)
             if isinstance(sprite, Player) and debug_player:
                 pygame.draw.circle(self.pre_screen, 'blue', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, Planet) and debug_planet:
@@ -418,15 +421,19 @@ class Camera(BasicObject):
     def freecam(self):
         # Beweeg de camera vrij met de pijltjestoetsen
         keys = pygame.key.get_pressed()
-        for key in keys:
-            if keys[pygame.K_LEFT]:
-                self.pos += (-0.05,0)
-            if keys[pygame.K_RIGHT]:
-                self.pos += (0.05,0)
-            if keys[pygame.K_UP]:
-                self.pos += (0,-0.05)
-            if keys[pygame.K_DOWN]:
-                self.pos += (0,0.05)    
+        scroll_speed = 20
+        if keys[pygame.K_LEFT] or keys[pygame.K_a] :
+            self.pos += (-scroll_speed,0)
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            self.pos += (scroll_speed,0)
+        if keys[pygame.K_UP] or keys[pygame.K_w]:
+            self.pos += (0,-scroll_speed)
+        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+            self.pos += (0,scroll_speed) 
+        if keys[pygame.K_q]:
+            self.zoom(self.zoom_level + 0.01)
+        if keys[pygame.K_e]:
+            self.zoom(self.zoom_level - 0.01)
 class Bullet(PhysicsObject, VisualObject):
 # Een kogel die het schip afvuurt.
     damage = 1
@@ -675,12 +682,11 @@ class BaseEnemy(Spaceship):
     # Verander deze waarden in de subklassen om een ander type vijand te maken
     spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt - to be implemented
     bullet_type = Bullet
-    bullet_reload = 60 # ticks to reload
+    bullet_reload = 180 # ticks to reload
     image_path = 'graphics/enemies/enemy_1.png' 
     hitbox_radius = 25
     max_hp = 3
     def __init__(self,pos,vel=0,angle=0,**kwargs):
-        print(self.__class__.hitbox_radius)
         super().__init__(image = self.__class__.image_path, vel=vel, pos=pos, angle = angle,hitbox_radius = self.__class__.hitbox_radius , **kwargs)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image= self.base_image
@@ -692,10 +698,10 @@ class BaseEnemy(Spaceship):
         self.longer_target = None # for long duration navigate_to
         self.player_memory = 0 # ticker for remembering player 0 = forgotten
         self.desired_heading = None # this is for debug draw
-        self.bullet_ticker = 0
         if debug_enemy:
             self.status= '' # string that states what enemies does this tick
             self.prev_satus = '' # string that states what enemies does prev tick 
+            self.aim_target = None
     def turn_to(self,heading):
         turn_error = signed_angle_to( self.current_heading, heading)
         self.angle_moment += turn_error * 2 - self.angle_moment * 0.1  # tune this multiplier         
@@ -841,22 +847,71 @@ class BaseEnemy(Spaceship):
                 return
         self.drift()
     def player_interact(self):
+        
         if (self.pos - player.pos).magnitude_squared() > 500 ** 2: 
             self.navigate_to_point(player.pos)
         elif (self.vel - player.vel).magnitude_squared() > 150 ** 2:
             self.match_vel(player)
+        else:self.aim(self.get_pos_pred(player))
         if self.bullet_ticker < 30:
-            self.aim(player)
+            self.aim(self.get_pos_pred(player))
             if self.bullet_ticker == 0: self.shoot()
-    def aim(self,target):
-        self.turn_to(target.pos-self.pos)
-        # to be improved
+               
+        
+    def aim(self, pos):
+        self.turn_to(pos-self.pos)
         '''
-        dist = (target.pos - self.pos).magnitude()
-        travel_time = dist/self.__class__.bullet_type.speed
-        predicted_pos = target.position_estimation[max(0,min(int(travel_time // Spaceship.pos_estim_step_size)-1,4))]
-        self.turn_to(predicted_pos -self.pos)
+        target_vect = pos - self.pos
+        target_dir = target_vect.normalize()
+        
+        bullet_speed = self.__class__.bullet_type.speed
+        
+        # decompose own velocity into components
+        perp_vel = self.vel - self.vel.dot(target_dir) * target_dir  # velocity perpendicular to target
+        perp_speed = perp_vel.magnitude()
+        
+        # lead angle from trig: sin(a) = perp_speed / bullet_speed
+        if perp_speed < bullet_speed:  # avoid domain error
+            lead_angle = math.degrees(math.asin(perp_speed / bullet_speed))
+            # rotate toward the side the perp vel is pushing
+            sign = -1 if target_dir.rotate(90).dot(perp_vel) > 0 else 1
+            corrected_dir = target_dir.rotate(sign * lead_angle)
+        else:
+            corrected_dir = target_dir  # fallback, cant compensate
+        
+        self.turn_to(corrected_dir)
+        return corrected_dir.dot(self.current_heading) > 0.8
         '''
+        
+        
+    def get_pos_pred(self, target):
+        target_vect = target.pos - self.pos
+        dist = target_vect.magnitude()
+        target_dir = target_vect / dist
+        
+        bullet_speed = self.__class__.bullet_type.speed
+        # relative closing speed along the target direction
+        relative_vel = (self.vel - target.vel).dot(target_dir)
+        effective_speed = bullet_speed + relative_vel
+        
+        if effective_speed <= 0:  # bullet can never reach target
+            return target.pos
+        
+        travel_time = dist / effective_speed
+        target_decimal_index = max(0, (travel_time * fps / Spaceship.pos_estim_step_size) - 1)
+        delta = target_decimal_index - math.floor(target_decimal_index)
+        floor_index = int(math.floor(target_decimal_index))
+        
+        if floor_index == 0 and target_decimal_index < 1:
+            # interpolate between current pos and first prediction
+            predict = (1 - delta) * target.pos + delta * target.position_estimation[0]
+        elif floor_index >= 4:
+            predict = target.position_estimation[4]
+        else:
+            predict = ((1 - delta) * target.position_estimation[floor_index - 1]
+                           + delta * target.position_estimation[floor_index])
+        self.aim_target = predict
+        return predict
     def match_vel(self,target):
         if debug_enemy: self.status = 'matching vel'
         d_vel = target.vel - self.vel
@@ -870,7 +925,7 @@ class BaseEnemy(Spaceship):
         
         keys = pygame.key.get_pressed()
         if keys[pygame.K_l]:
-            pass #debug
+            self.aim(self.get_pos_pred(player)) #debug
             
         if self.player_memory > 0:
             self.player_memory -= 1
@@ -1130,11 +1185,7 @@ def main():
                     prefab_binary_planet(camera.pos)
                 if event.key == pygame.K_o:
                     simpel_planet_spawn(camera.pos,vel=(0,0))
-                if debug_freecam:
-                    if event.key == pygame.K_q:
-                        camera.zoom(camera.zoom_level *1.1)
-                    if event.key == pygame.K_e:
-                        camera.zoom(camera.zoom_level*0.9)
+                
         
         #update world gen
         chunkmanager.update()
@@ -1177,9 +1228,9 @@ try:
     true_width = 3000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = False
-    debug_player = True
-    debug_planet = True
+    debug = True
+    debug_player = False
+    debug_planet = False
     debug_freecam = False
     debug_disable_world_gen = False
     debug_world_gen = False
