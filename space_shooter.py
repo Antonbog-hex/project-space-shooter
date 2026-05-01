@@ -307,8 +307,7 @@ class Camera(BasicObject):
         self.scaler = self.final_screen.get_width() / effective_width
         self.screen_width = self.pre_screen.get_width()
         self.screen_height = self.pre_screen.get_height()
-        self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)
-        
+        self.offset = pygame.math.Vector2(self.screen_width / 2, self.screen_height / 2)  
     def zoom(self, zoom_level):
         self.zoom_level = zoom_level
         self._rebuild_pre_screen()
@@ -330,8 +329,7 @@ class Camera(BasicObject):
         required_zoom =  desired_height/base_half_h if desired_height > 0 else self.base_zoom
         required_zoom = pygame.math.clamp(required_zoom, self.min_zoom, self.max_zoom)
         self.zoom_level += (required_zoom - self.zoom_level) * 0.05 # LERP zoom
-        self._rebuild_pre_screen()
-        
+        self._rebuild_pre_screen()  
     def background_draw(self):
         # Tegelt de achtergrondafbeelding zodat hij oneindig groot lijkt.
         self.pre_screen.fill((0,0,0))
@@ -355,7 +353,6 @@ class Camera(BasicObject):
                 self.pre_screen.blit(self.background_surf, (x, y))
                 y += bg_w
             x += bg_h
-
     def debug_draw(self,group):
         # Tekent snelheidsvectoren en hitboxen (alleen zichtbaar als debug=True)
         if not hasattr(group,'__iter__'): # catches when attempting to draw a single object
@@ -373,7 +370,7 @@ class Camera(BasicObject):
             if isinstance(sprite, Target):
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, BaseEnemy):
-                pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 100)
+                pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 800)
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
                 if sprite.desired_heading != None:
                     pygame.draw.line(camera.pre_screen, 'purple', pos, pos + sprite.desired_heading.normalize() * 100)
@@ -384,12 +381,10 @@ class Camera(BasicObject):
                 pygame.draw.circle(self.pre_screen, 'blue', pos, sprite.hitbox_radius,width = 1)
             if isinstance(sprite, Planet) and debug_planet:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
-
     def player_predict_draw(self):
         # Tekent de voorspelde baan van de speler als witte stippen
         for pos in player.position_estimation:
-            pygame.draw.circle(self.pre_screen, 'white', pos - self.pos + self.offset , 4)
-        
+            pygame.draw.circle(self.pre_screen, 'white', pos - self.pos + self.offset , 4) 
     def draw(self, group):
         if not hasattr(group, '__iter__'):
             group = [group]
@@ -408,16 +403,12 @@ class Camera(BasicObject):
                 hp_fraction = sprite.hp / sprite.max_hp
                 hp_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, int(bar_width * hp_fraction), bar_height)
                 pygame.draw.rect(self.pre_screen, (0, 200, 0), hp_rect)
-        
-
     def finalise(self):
         # Schaal de pre_screen naar het echte venster en toon hem
         scaled = pygame.transform.rotozoom(self.pre_screen, 0, self.scaler)
         x = (self.final_screen.get_width() - scaled.get_width()) // 2
         y = (self.final_screen.get_height() - scaled.get_height()) // 2
         self.final_screen.blit(scaled, (x, y))
-        
-    
     def freecam(self):
         # Beweeg de camera vrij met de pijltjestoetsen
         keys = pygame.key.get_pressed()
@@ -437,7 +428,7 @@ class Camera(BasicObject):
 class Bullet(PhysicsObject, VisualObject):
 # Een kogel die het schip afvuurt.
     damage = 1
-    speed = 800
+    speed = 1000
     lifetime = 180
     def __init__(self, pos, vel, source):
         # Maak een klein oranje cirkeltje als afbeelding voor de kogel
@@ -456,6 +447,10 @@ class Bullet(PhysicsObject, VisualObject):
                     obj.kys()
                     self.kys()
                 elif isinstance(obj, BaseEnemy):
+                    obj.take_damage(self.__class__.damage)
+                    self.kys()
+                elif isinstance(obj, Player):
+                    print('player hit !')
                     obj.take_damage(self.__class__.damage)
                     self.kys()
     def update(self):
@@ -859,29 +854,25 @@ class BaseEnemy(Spaceship):
                
         
     def aim(self, pos):
-        self.turn_to(pos-self.pos)
-        '''
-        target_vect = pos - self.pos
-        target_dir = target_vect.normalize()
+        #self.angle += signed_angle_to(self.current_heading, pos - self.pos)
+        target_dir = (pos - self.pos)
+        if target_dir.magnitude_squared() == 0:
+            return False
+        target_dir = target_dir.normalize()
         
         bullet_speed = self.__class__.bullet_type.speed
         
-        # decompose own velocity into components
-        perp_vel = self.vel - self.vel.dot(target_dir) * target_dir  # velocity perpendicular to target
-        perp_speed = perp_vel.magnitude()
-        
-        # lead angle from trig: sin(a) = perp_speed / bullet_speed
-        if perp_speed < bullet_speed:  # avoid domain error
-            lead_angle = math.degrees(math.asin(perp_speed / bullet_speed))
-            # rotate toward the side the perp vel is pushing
-            sign = -1 if target_dir.rotate(90).dot(perp_vel) > 0 else 1
-            corrected_dir = target_dir.rotate(sign * lead_angle)
-        else:
-            corrected_dir = target_dir  # fallback, cant compensate
-        
-        self.turn_to(corrected_dir)
+        # we want: heading * bullet_speed + self.vel = target_dir * some_speed
+        # so: heading = (target_dir * some_speed - self.vel) / bullet_speed
+        # approximate by removing the perp component of self.vel from the heading
+        corrected = target_dir * bullet_speed - self.vel
+        if corrected.magnitude_squared() == 0:
+            return False
+        corrected_dir = corrected.normalize()
+        self.angle += signed_angle_to(self.current_heading,corrected_dir)
         return corrected_dir.dot(self.current_heading) > 0.8
-        '''
+        
+        
         
         
     def get_pos_pred(self, target):
@@ -1167,7 +1158,7 @@ def main():
     if not debug_freecam:
         active_object.add(player)
    
-    debug_enemy = BaseEnemy(pos = (800,0), angle = 180)
+    debug_enemy = BaseEnemy(pos = (400,0),vel = (0,100), angle = 180)
     active_object.add(debug_enemy)
 
     active_object.add(debug_mass)
@@ -1232,11 +1223,11 @@ try:
     debug_player = False
     debug_planet = False
     debug_freecam = False
-    debug_disable_world_gen = False
+    debug_disable_world_gen = True
     debug_world_gen = False
     debug_enemy = True
     
-    player = Player((0,0), (0,0), 0)
+    player = Player(pos=(0,0),vel=(0,200),angle= 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
     fps = 60
