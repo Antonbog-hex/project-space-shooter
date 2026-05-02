@@ -681,6 +681,24 @@ class BaseEnemy(Spaceship):
     image_path = 'graphics/enemies/enemy_1.png' 
     hitbox_radius = 25
     max_hp = 3
+    # turn_to parameters
+    snap_cutoff = 1 # angle at wich it just snaps the turn
+    to_moment_amplifier = 2 # how much the desired angle causes change in moment
+    moment_dampener = 0.1 # dampening of the change in moment based on the magnitude of moment
+    # navigate_to_point
+    perp_correction_cutoff = 50 # perp vel at which correction starts
+    min_approach_speed = 300
+    #drift
+    min_drift_speed = 350
+    max_drift_speed = 400
+    #swerve
+    deflect_angle = 100 # the target deflection away from the line connecting ship and obstacle
+    swerve_ticker_length = 45 # ticks the ship keeps flying away
+    # check_visual (player finding)
+    max_player_dist = 2500 # distance at which player if fully forgotten
+    visual_cone_angle = 100 # degrees of visual cone
+    # get_pos_predict
+    pred_iterations = 3
     def __init__(self,pos,vel=0,angle=0,**kwargs):
         super().__init__(image = self.__class__.image_path, vel=vel, pos=pos, angle = angle,hitbox_radius = self.__class__.hitbox_radius , **kwargs)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
@@ -699,7 +717,10 @@ class BaseEnemy(Spaceship):
             self.aim_target = None
     def turn_to(self,heading):
         turn_error = signed_angle_to( self.current_heading, heading)
-        self.angle_moment += turn_error * 2 - self.angle_moment * 0.1  # tune this multiplier         
+        if abs(turn_error) < self.__class__.snap_cutoff: 
+            self.angle += turn_error 
+        else:
+            self.angle_moment += turn_error * self.__class__.to_moment_amplifier - self.angle_moment * self.__class__.moment_dampener  # tune this multiplier         
     def navigate_to_point(self, point: pygame.Vector2, for_frames=1):
         # navigates to a certain point in world coord, for multible frames if desired
         if debug_enemy: self.status = 'navigating to a point'
@@ -707,20 +728,17 @@ class BaseEnemy(Spaceship):
         if for_frames > 1:
             self.longer_target = point
             self.ticker = for_frames
-    
         to_target = point - self.pos
         dist = to_target.magnitude()
         desired_heading = to_target / dist
-        
         vel_perp = self.vel - desired_heading * self.vel.dot(desired_heading)
         perp_speed = vel_perp.magnitude()
-        
         # tilt heading to oppose perpendicular drift if it gets large
         # this avoids out-of-control spinning
-        if perp_speed > 50:
-            correction = (-vel_perp.normalize()) * min(perp_speed / 300, 1.0)
+        if perp_speed > self.__class__.perp_correction_cutoff:
+            correction = (-vel_perp.normalize()) * min(perp_speed / 300, 1.0) # magic numbers, self correcting behaviour
             desired_heading = (desired_heading + correction).normalize()
-        self.desired_heading = desired_heading
+        self.desired_heading = desired_heading # for debug draw
         self.turn_to(desired_heading)
     
         # velocity component toward the target
@@ -736,15 +754,15 @@ class BaseEnemy(Spaceship):
         if braking_dist >= dist * 0.8:
             # close to overshoot — brake
             self.decelerate()
-        elif vel_toward < 300 and aligned:
+        elif vel_toward < self.__class__.min_approach_speed and aligned:
             self.accelerate()
     def drift(self):
         # basic movement if nothing is around
         if debug_enemy: self.status = 'drifting'
         self.turn_to(self.vel)
-        if self.vel.magnitude_squared() > 400 **2:
+        if self.vel.magnitude_squared() > self.__class__.min_drift_speed **2:
             self.decelerate()
-        elif self.vel.magnitude_squared() < 350 ** 2:
+        elif self.vel.magnitude_squared() < self.__class__.max_drift_speed ** 2:
             self.accelerate()
     def orbit(self,object):
         # attempts to orbits the given object
@@ -771,18 +789,15 @@ class BaseEnemy(Spaceship):
     def swerve(self,danger_object):
         if debug_enemy: self.status = 'swerving'
         delta = (danger_object.pos- self.pos).normalize()
-        desired_cw = delta.rotate(100)
-        desired_ccw = delta.rotate(-100)
-        
+        desired_cw = delta.rotate(self.__class__.deflect_angle)
+        desired_ccw = delta.rotate(-self.__class__.deflect_angle)
         if self.current_heading * desired_cw >  self.current_heading * desired_ccw: #uses inproduct as a metric of alignedness
             desired_heading = desired_cw
-            
         else:
             desired_heading = desired_ccw
-            
         self.desired_heading = desired_heading
         self.longer_heading = desired_heading
-        self.ticker = 45
+        self.ticker = self.__class__.swerve_ticker_length
         self.turn_to(desired_heading)
         if self.current_heading * delta > 0:
             self.decelerate()
@@ -799,10 +814,10 @@ class BaseEnemy(Spaceship):
         return swerving      
     def check_visual(self):
         delta = player.pos - self.pos
-        if delta.magnitude_squared() > 2500**2: 
+        if delta.magnitude_squared() > self.__class__.max_player_dist**2: 
             self.player_memory = 0
             return False
-        if delta.normalize() * self.current_heading < math.cos(50): 
+        if delta.normalize() * self.current_heading < math.cos(self.__class__.visual_cone_angle/2): 
             return False
         linetest = LineHitbox(self.pos, player.pos)
         for obj in active_object:
@@ -825,6 +840,80 @@ class BaseEnemy(Spaceship):
             self.navigate_to_point(self.longer_target)
             if self.ticker == 0: self.longer_target = None
         return True
+    def aim(self, pos):
+        target_dir = (pos - self.pos)
+        if target_dir.magnitude_squared() == 0:
+            return False
+        target_dir = target_dir.normalize()
+        
+        bullet_speed = self.__class__.bullet_type.speed
+        perp_vel = self.vel - self.vel.dot(target_dir) * target_dir
+        perp_speed = perp_vel.magnitude()
+        
+        if perp_speed >= bullet_speed:
+            self.turn_to(target_dir)
+            return False
+        
+        lead_angle = math.degrees(math.asin(perp_speed / bullet_speed))
+        # rotate opposite to perp_vel to cancel it out
+        sign = -1 if target_dir.rotate(90).dot(perp_vel) > 0 else 1
+        corrected_dir = target_dir.rotate(sign * lead_angle)
+        
+        self.turn_to(corrected_dir)
+        return corrected_dir.dot(self.current_heading) > 0.8  
+    def get_pos_pred(self, target):
+        bullet_speed = self.__class__.bullet_type.speed
+    
+        # start with current pos as initial guess
+        predict = target.pos
+    
+        for _ in range(self.__class__.pred_iterations):
+            target_vect = predict - self.pos
+            dist = target_vect.magnitude()
+            if dist == 0:
+                return target.pos
+            target_dir = target_vect / dist
+    
+            relative_vel = (self.vel - target.vel).dot(target_dir)
+            effective_speed = bullet_speed + relative_vel
+    
+            if effective_speed <= 0:
+                return target.pos
+    
+            travel_time = dist / effective_speed
+            target_decimal_index = max(0, (travel_time * fps / Spaceship.pos_estim_step_size) - 1)
+            delta = target_decimal_index - math.floor(target_decimal_index)
+            floor_index = int(math.floor(target_decimal_index))
+            ceil_index = floor_index + 1
+            if floor_index == 0:
+                predict = (1 - delta) * target.pos + delta * target.position_estimation[0]
+            elif ceil_index > 4:
+                predict = target.position_estimation[4]
+            else:
+                predict = ((1 - delta) * target.position_estimation[floor_index ]
+                               + delta * target.position_estimation[ceil_index])
+    
+        self.aim_target = predict
+        return predict
+    def match_vel(self,target):
+        if debug_enemy: self.status = 'matching vel'
+        d_vel = target.vel - self.vel
+        if d_vel * self.current_heading > 0:
+            self.accelerate()
+        if d_vel * self.current_heading < 0:
+            self.decelerate()
+        self.turn_to(target.pos-self.pos)   
+    def pre_update(self):
+        super().pre_update()
+        if self.player_memory > 0:
+            self.player_memory -= 1
+        if self.check_visual():
+            self.player_memory = 300
+        self.general_movement()
+        if debug_enemy:
+            if self.status != self.prev_satus:
+                print(self.status)
+                self.prev_satus = self.status
     def general_movement(self):
         if self.avoid_collisions():
            return
@@ -840,94 +929,17 @@ class BaseEnemy(Spaceship):
             if (self.vel - self.strongest_grav.vel) * (self.strongest_grav.pos - self.pos).normalize() < 250: # check if youre already approaching
                 self.navigate_to_point(self.strongest_grav.pos)
                 return
-        self.drift()
+        self.drift()   
     def player_interact(self):
-        
         if (self.pos - player.pos).magnitude_squared() > 500 ** 2: 
             self.navigate_to_point(player.pos)
         elif (self.vel - player.vel).magnitude_squared() > 150 ** 2:
             self.match_vel(player)
-        else:self.aim(self.get_pos_pred(player))
+        else: self.aim(self.get_pos_pred(player))
         if self.bullet_ticker < 30:
             self.aim(self.get_pos_pred(player))
             if self.bullet_ticker == 0: self.shoot()
-               
-        
-    def aim(self, pos):
-        #self.angle += signed_angle_to(self.current_heading, pos - self.pos)
-        target_dir = (pos - self.pos)
-        if target_dir.magnitude_squared() == 0:
-            return False
-        target_dir = target_dir.normalize()
-        
-        bullet_speed = self.__class__.bullet_type.speed
-        
-        # we want: heading * bullet_speed + self.vel = target_dir * some_speed
-        # so: heading = (target_dir * some_speed - self.vel) / bullet_speed
-        # approximate by removing the perp component of self.vel from the heading
-        corrected = target_dir * bullet_speed - self.vel
-        if corrected.magnitude_squared() == 0:
-            return False
-        corrected_dir = corrected.normalize()
-        self.angle += signed_angle_to(self.current_heading,corrected_dir)
-        return corrected_dir.dot(self.current_heading) > 0.8
-        
-        
-        
-        
-    def get_pos_pred(self, target):
-        target_vect = target.pos - self.pos
-        dist = target_vect.magnitude()
-        target_dir = target_vect / dist
-        
-        bullet_speed = self.__class__.bullet_type.speed
-        # relative closing speed along the target direction
-        relative_vel = (self.vel - target.vel).dot(target_dir)
-        effective_speed = bullet_speed + relative_vel
-        
-        if effective_speed <= 0:  # bullet can never reach target
-            return target.pos
-        
-        travel_time = dist / effective_speed
-        target_decimal_index = max(0, (travel_time * fps / Spaceship.pos_estim_step_size) - 1)
-        delta = target_decimal_index - math.floor(target_decimal_index)
-        floor_index = int(math.floor(target_decimal_index))
-        
-        if floor_index == 0 and target_decimal_index < 1:
-            # interpolate between current pos and first prediction
-            predict = (1 - delta) * target.pos + delta * target.position_estimation[0]
-        elif floor_index >= 4:
-            predict = target.position_estimation[4]
-        else:
-            predict = ((1 - delta) * target.position_estimation[floor_index - 1]
-                           + delta * target.position_estimation[floor_index])
-        self.aim_target = predict
-        return predict
-    def match_vel(self,target):
-        if debug_enemy: self.status = 'matching vel'
-        d_vel = target.vel - self.vel
-        if d_vel * self.current_heading > 0:
-            self.accelerate()
-        if d_vel * self.current_heading < 0:
-            self.decelerate()
-        self.turn_to(target.pos-self.pos)   
-    def pre_update(self):
-        super().pre_update()
-        
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_l]:
-            self.aim(self.get_pos_pred(player)) #debug
-            
-        if self.player_memory > 0:
-            self.player_memory -= 1
-        if self.check_visual():
-            self.player_memory = 300
-        
-        self.general_movement()
-        if debug_enemy:
-            if self.status != self.prev_satus:
-                print(self.status)
-                self.prev_satus = self.status
+
 class Enemy1(BaseEnemy):
     # Snel maar lage hp
     hp           = 3
@@ -1220,10 +1232,10 @@ try:
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
     debug = True
-    debug_player = False
+    debug_player = True
     debug_planet = False
     debug_freecam = False
-    debug_disable_world_gen = True
+    debug_disable_world_gen = False
     debug_world_gen = False
     debug_enemy = True
     
