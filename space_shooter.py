@@ -28,6 +28,10 @@ class BasicObject():
             bullets.remove(self)
         except:
             pass
+        try:
+            planets.remove(self)
+        except:
+            pass
             
 class VisualObject(BasicObject):
 # Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
@@ -84,7 +88,7 @@ class GravityObject(BasicObject):
 
     def get_grav(self, other: "GravityObject"):
         # Berekent de zwaartekrachtsvector
-        if isinstance(self,Bullet) and self.source == other: return (0,0)
+        if isinstance(self,BaseBullet) and self.source == other: return (0,0)
         if self.pos == other.pos or not hasattr(self, 'force'):
             return
         diff = other.pos - self.pos
@@ -109,7 +113,7 @@ class GravityObject(BasicObject):
             strongest_grav = 0
             strongest_grav_source = None
         force = pygame.Vector2(0)
-        for object in active_object: #active_object is a global
+        for object in planets: #planets is a global, changed from active_objects to improve performance
             grav =  self.get_grav(object) or (0,0)
             if is_enemy:
                 grav_mag = grav[0] ** 2 + grav[1] ** 2
@@ -425,18 +429,24 @@ class Camera(BasicObject):
             self.zoom(self.zoom_level + 0.01)
         if keys[pygame.K_e]:
             self.zoom(self.zoom_level - 0.01)
-class Bullet(PhysicsObject, VisualObject):
+class BaseBullet(PhysicsObject, VisualObject):
 # Een kogel die het schip afvuurt.
     damage = 1
     speed = 1000
     lifetime = 180
+    radius = 4
+    texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
+    
+    mass = 1
     def __init__(self, pos, vel, source):
         # Maak een klein oranje cirkeltje als afbeelding voor de kogel
-        bullet_surface = pygame.Surface((8, 8), pygame.SRCALPHA)
-        pygame.draw.circle(bullet_surface, (255, 180, 50), (4, 4), 4)
-        super().__init__(pos=pos, vel=vel, mass=1, hitbox_radius=4,image=bullet_surface)
+        radius = self.__class__.radius
+        pygame.draw.circle(self.__class__.texture,(255, 180, 50), (radius, radius), radius)
+        super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=radius,image=self.__class__.texture)
         self.source = source
         self.lifetime = self.__class__.lifetime   # frames it lives
+class Bullet(BaseBullet):
+    pass
 
     def check_collisions(self):
         for obj in active_object:
@@ -539,6 +549,7 @@ class ChunkManager:
         try:
             for element in self.all_chunks[chunk]:
                 active_object.add(element)
+                if isinstance(element, Planet): planets.add(element)
         except:
             if not debug_disable_world_gen:
                 self.generate_chunk(chunk)
@@ -699,6 +710,13 @@ class BaseEnemy(Spaceship):
     visual_cone_angle = 100 # degrees of visual cone
     # get_pos_predict
     pred_iterations = 3
+    # general movement
+    orbit_force_req = 5000 # magnitude of force required to start orbitting
+    planet_approach_req = 2000 # magnitude of force required to approach planet
+    # player interact
+    approach_dist = 500 # distance beyond which the enemy approaches
+    max_rel_vel = 150 # maximum relative velocity before correcting
+    pre_aim_ticks = 30 # ammount of ticks ahead of shooting the enemy starts to aim
     def __init__(self,pos,vel=0,angle=0,**kwargs):
         super().__init__(image = self.__class__.image_path, vel=vel, pos=pos, angle = angle,hitbox_radius = self.__class__.hitbox_radius , **kwargs)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
@@ -922,21 +940,21 @@ class BaseEnemy(Spaceship):
         if self.player_memory > 0:
             self.player_interact()
             return
-        if self.force.magnitude_squared() > 5000**2 and self.strongest_grav != None:
+        if self.force.magnitude_squared() > self.__class__.orbit_force_req**2 and self.strongest_grav != None:
             self.orbit(self.strongest_grav)
             return
-        if self.force.magnitude_squared() > 2000**2 and self.strongest_grav != None:
+        if self.force.magnitude_squared() > self.__class__.planet_approach_req**2 and self.strongest_grav != None:
             if (self.vel - self.strongest_grav.vel) * (self.strongest_grav.pos - self.pos).normalize() < 250: # check if youre already approaching
                 self.navigate_to_point(self.strongest_grav.pos)
                 return
         self.drift()   
     def player_interact(self):
-        if (self.pos - player.pos).magnitude_squared() > 500 ** 2: 
+        if (self.pos - player.pos).magnitude_squared() > self.__class__.approach_dist ** 2: 
             self.navigate_to_point(player.pos)
-        elif (self.vel - player.vel).magnitude_squared() > 150 ** 2:
+        elif (self.vel - player.vel).magnitude_squared() > self.__class__.max_rel_vel ** 2:
             self.match_vel(player)
         else: self.aim(self.get_pos_pred(player))
-        if self.bullet_ticker < 30:
+        if self.bullet_ticker < self.__class__.pre_aim_ticks:
             self.aim(self.get_pos_pred(player))
             if self.bullet_ticker == 0: self.shoot()
 
@@ -1047,6 +1065,8 @@ def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2
     
     active_object.add(p1)
     active_object.add(p2)
+    planets.add(p1)
+    planets.add(p2)
     return p1, p2
 
 def spawn_in_orbit(center_pos, anchor_mass, r, angle, style, density, size):
@@ -1055,12 +1075,13 @@ def spawn_in_orbit(center_pos, anchor_mass, r, angle, style, density, size):
     vel = pygame.Vector2(v, 0).rotate(angle + 90)
     planet = Planet(center_pos + offset, vel, style, density, size=size)
     active_object.add(planet)
+    planets.add(planet)
     return planet
 
 def prefab_moon_system(pos, moon_count=None):
     central = Planet(pos, (0,0), random_planet_type(), 4.0, size=1.8)
     active_object.add(central)
-
+    planets.add(central)
     moon_count = moon_count or random.randint(1, 4)
     spawned = [central]
     for i in range(moon_count):
@@ -1079,6 +1100,7 @@ def prefab_asteroid_field(pos, count=None):
         vel = pygame.Vector2(random.uniform(-80, 80),   random.uniform(-80, 80))
         asteroid = Planet(pos + offset, vel, 'moon', random.uniform(2, 5), size=random.uniform(0.05, 0.2))
         active_object.add(asteroid)
+        planets.add(asteroid)
         spawned.append(asteroid)
     return spawned
 
@@ -1086,7 +1108,7 @@ def prefab_asteroid_field(pos, count=None):
 def prefab_black_hole(pos):
     bh = Planet(pos, (0, 0), 'black_hole', density=50, size=0.6)
     active_object.add(bh)
-
+    planets.add(bh)
     spawned = [bh]
     ring_count = random.randint(4, 8)
     for i in range(ring_count):
@@ -1106,6 +1128,7 @@ def prefab_triple_star(pos):
 def prefab_ringed_planet(pos):
     central = Planet(pos, (0, 0), random_planet_type(), density=3.5, size=2.0)
     active_object.add(central)
+    planets.add(central)
     
     spawned = [central]
     ring_count = random.randint(10, 18)
@@ -1118,7 +1141,7 @@ def prefab_ringed_planet(pos):
 def prefab_satellite_network(pos):
     central = Planet(pos, (0, 0), random_planet_type(), density=3.5, size=1.5)
     active_object.add(central)
-
+    planets.add(central)
     spawned = [central]
     for i in range(random.randint(3, 6)):
         r = random.uniform(350, 900)
@@ -1203,7 +1226,7 @@ def main():
             player.pos = camera.pos
         else:
             camera.track(player)
-        
+        print(clock.get_fps())
         # Teken alles
         camera.background_draw()
         camera.draw(active_object)
@@ -1234,10 +1257,10 @@ try:
     debug = True
     debug_player = True
     debug_planet = False
-    debug_freecam = False
+    debug_freecam = True
     debug_disable_world_gen = False
     debug_world_gen = False
-    debug_enemy = True
+    debug_enemy = False
     
     player = Player(pos=(0,0),vel=(0,200),angle= 0)
     camera = Camera(screen)
@@ -1247,6 +1270,7 @@ try:
     grav_cte = 6000
     active_object = ActiveObjects()
     bullets = ActiveObjects()
+    planets = ActiveObjects()
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
     debug_mass = DebugMass()
     main()
