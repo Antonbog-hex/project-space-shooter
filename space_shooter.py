@@ -12,6 +12,8 @@ class BasicObject():
 
     def __init__(self,pos: pygame.Vector2 = 0):
         self.pos = pygame.math.Vector2(pos)
+        self._is_moving = isinstance(self, MovingObject)
+        self._is_visual = isinstance(self, VisualObject)
     
     def update(self):
         pass # Lege methode, zodat super().update() altijd werkt
@@ -79,17 +81,19 @@ class MovingObject(BasicObject):
 
 class GravityObject(BasicObject):
     # Object voor berekenen zwaartekrachten
-
+    grav_ticker = 3 # how many frames gravity gets recalculated
     def __init__(self, mass: int = 200, **kwargs):
         super().__init__(**kwargs)
         self.mass = mass
+        self.grav_calc_ticker = random.randint(0,self.__class__.grav_ticker)
+        if isinstance(self, Planet): self.reaction_f = pygame.Vector2(0) # this is a var used to lower grav calc using action-reaction principle
         if isinstance(self, MovingObject):
             self.force = pygame.Vector2(0)
 
     def get_grav(self, other: "GravityObject"):
         # Berekent de zwaartekrachtsvector
-        if isinstance(self,BaseBullet) and self.source == other: return (0,0)
-        if self.pos == other.pos or not hasattr(self, 'force'):
+        if self._is_bullet and self.source == other: return (0,0)
+        if self.pos == other.pos or not self._is_moving:
             return
         diff = other.pos - self.pos
         dist_sq = diff.magnitude_squared()
@@ -99,36 +103,51 @@ class GravityObject(BasicObject):
         # Standaard gravitatiewet: F = G * m1 * m2 / r²  (als vector)
         f = grav_cte * self.mass * other.mass * diff / dist_sq ** 1.5
 
-        if isinstance(self, Spaceship):
+        if self._is_spaceship:
             f += grav_cte * 0.01 * self.mass * other.mass * diff / dist_sq ** 1.3
-        if f.magnitude_squared()/self.mass < 200**2 and isinstance(self,Planet):
-            return (0,0)
+        
         
         return f
         
     def get_total_gravity(self):
         # Som van alle gravitatiekrachten van elk object
-        is_enemy = isinstance(self, BaseEnemy)
+        is_enemy = self._is_enemy
         if is_enemy:
             strongest_grav = 0
             strongest_grav_source = None
-        force = pygame.Vector2(0)
-        for object in planets: #planets is a global, changed from active_objects to improve performance
-            grav =  self.get_grav(object) or (0,0)
+        if self._is_planet:
+            force = self.reaction_f
+            self.reaction_f = pygame.Vector2(0)
+        else:
+            force = pygame.Vector2(0)
+        
+        for planet in planets: #planets is a global, changed from active_objects to improve performance
+            if planet is self:
+                continue
+            if self._is_planet and id(self) > id(planet):
+                continue  # handled already via reaction_f
+            grav = self.get_grav(planet) or (0, 0)
+            if self._is_planet:
+                planet.reaction_f -= grav
             if is_enemy:
                 grav_mag = grav[0] ** 2 + grav[1] ** 2
                 if  grav_mag > strongest_grav:
                     strongest_grav = grav_mag
-                    strongest_grav_source = object
+                    strongest_grav_source = planet                    
             force += grav
         if is_enemy:self.strongest_grav = strongest_grav_source
         return force
 
     def pre_update(self):
         # Wordt elke frame vóór update() aangeroepen om acc bij te werken.
-        if isinstance(self, MovingObject):
-            self.force = self.get_total_gravity()
-            self.acc = self.force / self.mass
+        if  self._is_moving:
+            
+            if  self.grav_calc_ticker == 0:
+                self.force = self.get_total_gravity()
+                self.acc = self.force / self.mass
+                self.grav_calc_ticker = self.__class__.grav_ticker
+            else:
+                self.grav_calc_ticker -= 1
         super().pre_update() 
 
 class RotatingObject(BasicObject):
@@ -148,17 +167,18 @@ class RotatingObject(BasicObject):
 
     def update(self):
         self.angle += self.angle_moment*timestep
-        if isinstance(self, VisualObject): self.image = pygame.transform.rotozoom(self.base_image, self.angle, 1)
+        if self._is_visual: self.image = pygame.transform.rotozoom(self.base_image, self.angle, 1)
         super().update()
 
 class Hitbox(BasicObject):
     # Basisklasse voor botsingsdetectie
     def __init__(self,**kwargs):
         super().__init__(**kwargs)
-    
+        self._is_circular = isinstance(self, CircularHitbox)
+        self._is_line = isinstance(self, LineHitbox)
     def hit(self,other: 'Hitbox') -> bool:
         pass
-class LineHitbox(BasicObject):
+class LineHitbox(Hitbox):
     def __init__(self,start_pos:pygame.Vector2,end_pos:pygame.Vector2):
         super().__init__(pos=start_pos)
         self.end = end_pos
@@ -167,7 +187,8 @@ class LineHitbox(BasicObject):
         self.maxx = max(self.pos.x,self.end.x)
         self.maxy = max(self.pos.y,self.end.y)
     def hit(self,other):
-        if isinstance(other, LineHitbox):
+        if self.pos == self.end: return False
+        if other._is_line:
             #currenlty unused, may be faulthy
             # bounding box check first (cheap)
             if self.minx > other.maxx or self.maxx < other.minx:
@@ -191,9 +212,9 @@ class LineHitbox(BasicObject):
             # intersection happens at self.pos + d1 * t or other.pos + d2 * u
             print(u,t)
             return 0 <= t <= 1 and 0 <= u <= 1
-        if isinstance(other, CircularHitbox):
+        if other._is_circular:
             d = self.end - self.pos
-            t = (other.pos - self.pos).dot(d) / d.dot(d)
+            t = ((other.pos - self.pos) * d )/ (d*d)
             t = max(0.0, min(1.0, t))
             closest = self.pos + d * t
             return (closest - other.pos).magnitude_squared() <= other.hitbox_radius ** 2
@@ -204,16 +225,23 @@ class CircularHitbox(Hitbox):
         self.hitbox_radius = radius
 
     def hit(self,other)-> bool:
-        if isinstance(other, CircularHitbox):
+        if other._is_circular:
             return (self.pos - other.pos).magnitude_squared() <= (self.hitbox_radius + other.hitbox_radius)**2 
-        if isinstance(other, LineHitbox):
+        if other._is_line:
             return other.hit(self)
 # %% combined classes
 class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
     # Combineert zwaartekracht + beweging + botsingsdetectie. Dit is de basis voor planeten en spaceships.
     def __init__(self, pos,vel = 0, force = 0, mass = 20, hitbox_radius = 20, **kwargs):
         super().__init__(pos=pos,vel=vel, mass=mass, radius = hitbox_radius, **kwargs)
-
+        self._is_planet = isinstance(self, Planet)
+        self._is_spaceship = isinstance(self, Spaceship)
+        self._is_enemy = isinstance(self, BaseEnemy)
+        self._is_bullet = isinstance(self, BaseBullet)
+        self._is_predictor = isinstance(self, Predictor)
+        self._is_target = isinstance(self, Target)
+        self._is_player = isinstance(self, Player)
+        self._is_physics  = True
     def elastic_collision(self, other,energy_dis = 1, reflective = True):
          """
         Verwerkt een elastische botsing tussen dit object en "other".
@@ -243,18 +271,15 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
          self.vel -= impulse * other.mass * normal
          self.pos += normal*0.51*overlap
 
-         if isinstance(other,MovingObject) and reflective:
+         if other._is_moving and reflective:
              other.vel += impulse * self.mass * normal
              other.pos -= normal*0.51*overlap       
     def pre_update(self):
-        if isinstance(self,Predictor):
-            pass
-        elif not chunkmanager.in_safezone(self.pos):
-            
+        if not chunkmanager.in_safezone(self.pos):
             try:
                 chunkmanager.all_chunks[chunkmanager.get_chunk(self.pos)].append(self)
-                if not isinstance(self, Predictor):
-                    if debug_world_gen: print(f'unloaded{self}')
+                if debug_world_gen and not self._is_predictor:
+                    print(f'unloaded{self}')
             except:
                 if debug_world_gen: print(f"{self} entered a never before loaded chunk and was destroyed")
             finally:
@@ -362,7 +387,7 @@ class Camera(BasicObject):
         if not hasattr(group,'__iter__'): # catches when attempting to draw a single object
             group = [group]
         for sprite in group:
-            if isinstance(sprite, PhysicsObject):
+            if sprite._is_physics:
                 pos = sprite.pos
                 pos = pos - self.pos + self.offset
                 a = sprite.acc
@@ -371,9 +396,9 @@ class Camera(BasicObject):
                 v = sprite.vel
                 if v.magnitude_squared() != 0: v=v.clamp_magnitude(800)
                 pygame.draw.line(self.pre_screen, 'orange', pos, pos+v)
-            if isinstance(sprite, Target):
+            if sprite._is_target:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
-            if isinstance(sprite, BaseEnemy):
+            if sprite._is_enemy:
                 pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 800)
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
                 if sprite.desired_heading != None:
@@ -381,9 +406,9 @@ class Camera(BasicObject):
                 if sprite.aim_target != None:
                     target = sprite.aim_target - self.pos + self.offset
                     pygame.draw.circle(self.pre_screen, 'magenta', target , 5)
-            if isinstance(sprite, Player) and debug_player:
+            if sprite._is_player and debug_player:
                 pygame.draw.circle(self.pre_screen, 'blue', pos, sprite.hitbox_radius,width = 1)
-            if isinstance(sprite, Planet) and debug_planet:
+            if sprite._is_planet and debug_planet:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
     def player_predict_draw(self):
         # Tekent de voorspelde baan van de speler als witte stippen
@@ -395,8 +420,10 @@ class Camera(BasicObject):
         for sprite in group:
             pos = sprite.get_frame_pos() - self.pos + self.offset
             self.pre_screen.blit(sprite.image, pos)
-    
-            if isinstance(sprite, BaseEnemy):
+            ''' 
+            !!! to be changed with seperate class !!!
+            '''
+            if sprite._is_enemy:
                 bar_width  = 40
                 bar_height = 5
                 center_pos = sprite.pos - self.pos + self.offset
@@ -445,21 +472,18 @@ class BaseBullet(PhysicsObject, VisualObject):
         super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=radius,image=self.__class__.texture)
         self.source = source
         self.lifetime = self.__class__.lifetime   # frames it lives
-class Bullet(BaseBullet):
-    pass
-
     def check_collisions(self):
         for obj in active_object:
             if obj != self.source and self.hit(obj):
-                if isinstance(obj, Planet):
+                if obj._is_planet:
                     self.kys()
-                elif isinstance(obj, Target):
+                elif obj._is_target:
                     obj.kys()
                     self.kys()
-                elif isinstance(obj, BaseEnemy):
+                elif obj._is_enemy:
                     obj.take_damage(self.__class__.damage)
                     self.kys()
-                elif isinstance(obj, Player):
+                elif obj._is_player:
                     print('player hit !')
                     obj.take_damage(self.__class__.damage)
                     self.kys()
@@ -469,7 +493,8 @@ class Bullet(BaseBullet):
             self.kys()
         self.check_collisions()
         super().update()
-                
+class Bullet(BaseBullet):
+    pass                
 class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     pos_estim_step_size = 20# number of frames that get predicted per step
     max_hp = 1
@@ -486,9 +511,9 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         self.bullet_ticker = self.__class__.bullet_reload
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle)) # direction of pointing normvector
     def accelerate(self):
-        self.acc += self.current_heading * self.speed
+        self.acc = self.current_heading * self.speed + self.force / self.mass
     def decelerate(self):
-        self.acc -= self.current_heading * self.speed * 0.5
+        self.acc =  - self.current_heading * self.speed * 0.5 + self.force / self.mass
     def pos_estimation_update(self,steps=5):
         # Simuleert de toekomstige baan door een kopie van het schip vooruit te bewegen zonder het echte schip aan te passen.
         active_object.remove(self)
@@ -514,9 +539,9 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         # Controleer of het schip een planeet raakt en stuit dan terug.
         for sprite in active_object:
             if id(sprite) < id (self) and self.hit(sprite):
-                if isinstance(sprite, Planet):
+                if sprite._is_planet:
                     self.elastic_collision(sprite,energy_dis= 1.1)
-                if isinstance(sprite,Spaceship):
+                if sprite._is_spaceship:
                     self.elastic_collision(sprite, energy_dis = 1.4)
     def _orientation_update(self):
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
@@ -549,7 +574,7 @@ class ChunkManager:
         try:
             for element in self.all_chunks[chunk]:
                 active_object.add(element)
-                if isinstance(element, Planet): planets.add(element)
+                if element._is_planet: planets.add(element)
         except:
             if not debug_disable_world_gen:
                 self.generate_chunk(chunk)
@@ -635,13 +660,13 @@ class Planet(PhysicsObject,VisualObject):
         # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
         for sprite in active_object:
             if id(sprite)< id(self) and self.hit(sprite):
-                if isinstance(sprite, Planet):
+                if sprite._is_planet:
                     self.elastic_collision(sprite,energy_dis= 0.9)
-                if isinstance(sprite, Spaceship):
+                if sprite._is_spaceship:
                     self.elastic_collision(sprite,energy_dis= 1.5)
               
     def pre_update(self):
-        if isinstance(self,MovingObject):
+        if self._is_moving:
             self.resolve_collisions()
         super().pre_update()
     def update(self):
@@ -650,6 +675,7 @@ class Planet(PhysicsObject,VisualObject):
 class Player(Spaceship):
     bullet_reload = 15
     max_hp = 15
+    grav_ticker = 1
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
         self.shoot_cooldown = 0
@@ -702,6 +728,8 @@ class BaseEnemy(Spaceship):
     #drift
     min_drift_speed = 350
     max_drift_speed = 400
+    # avoid collision
+    time_in_advance = 2 # number of seconds in advance checked for collision
     #swerve
     deflect_angle = 100 # the target deflection away from the line connecting ship and obstacle
     swerve_ticker_length = 45 # ticks the ship keeps flying away
@@ -822,12 +850,12 @@ class BaseEnemy(Spaceship):
         else:
            self.accelerate()
     def avoid_collisions(self):
-        predict_pos = self.next_pos(steps = 2 * fps)
+        predict_pos = self.next_pos(steps = self.__class__.time_in_advance * fps) # from MovingObject
         linetest = LineHitbox(self.pos, predict_pos)
         swerving = False
-        for obj in active_object:
-            if isinstance(obj, Planet) and linetest.hit(obj):
-                self.swerve(danger_object=obj)
+        for planet in planets:
+            if linetest.hit(planet):
+                self.swerve(danger_object=planet)
                 swerving = True
         return swerving      
     def check_visual(self):
@@ -838,8 +866,8 @@ class BaseEnemy(Spaceship):
         if delta.normalize() * self.current_heading < math.cos(self.__class__.visual_cone_angle/2): 
             return False
         linetest = LineHitbox(self.pos, player.pos)
-        for obj in active_object:
-            if isinstance(obj,Planet) and linetest.hit(obj):
+        for planet in planets:
+            if linetest.hit(planet):
                 return False
         return True
     def resolve_ticker(self):
@@ -975,7 +1003,7 @@ class Enemy2(BaseEnemy):
     spawn_weight = 1   # spawnt het minst vaak
 
 # Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
-all_enemy_types = [BaseEnemy, Enemy1, Enemy2]    
+all_enemy_types = [BaseEnemy, Enemy1, Enemy2]
 
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
@@ -1024,9 +1052,9 @@ def simpel_planet_spawn(pos,vel= None):
     #temperorary helper for planet tests
     vel = vel or pygame.Vector2(random.uniform(-200, 200),random.uniform(-200, 200))
     density = 2.5
-    
-    active_object.add(Planet(pos,vel,random_planet_type(),density,size=random.uniform(1,1.5)))
-
+    p = Planet(pos,vel,random_planet_type(),density,size=random.uniform(1,1.5))
+    active_object.add(p)
+    planets.add(p)
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
 
@@ -1185,11 +1213,11 @@ def main():
          pos = (random.uniform(100, 400), i * 200)
          active_object.append(Target(pos, size=1.5))
      '''
-    '''for i in range(20):
+    for i in range(20):
         pos = (random.uniform(100, 400), i * 200)
         active_object.append(BaseEnemy(pos,angle = 120))
         
-    '''
+    
     if not debug_freecam:
         active_object.add(player)
    
@@ -1219,24 +1247,20 @@ def main():
         # Beweeg alle objecten
         active_object.update()
         bullets.update()
-        
         # Beweeg de camera
         if debug_freecam:
             camera.freecam()
             player.pos = camera.pos
         else:
             camera.track(player)
-        print(clock.get_fps())
         # Teken alles
         camera.background_draw()
         camera.draw(active_object)
         camera.draw(bullets) 
         camera.player_predict_draw()
         if debug:
-            camera.debug_draw(player)
             camera.debug_draw(active_object)
         camera.finalise()
-        #print(clock.get_fps())
         pygame.display.update()
         clock.tick(fps)
         
@@ -1254,10 +1278,10 @@ try:
     true_width = 3000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = True
-    debug_player = True
+    debug = False
+    debug_player = False
     debug_planet = False
-    debug_freecam = True
+    debug_freecam = False
     debug_disable_world_gen = False
     debug_world_gen = False
     debug_enemy = False
