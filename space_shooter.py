@@ -34,6 +34,10 @@ class BasicObject():
             planets.remove(self)
         except:
             pass
+        try:
+            enemies.remove(self)
+        except:
+            pass
             
 class VisualObject(BasicObject):
 # Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
@@ -502,10 +506,11 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     speed =  500
     bullet_reload = 30
     
+    standard_mass = 100
     # Een ruimteschip: combineert physics, rotatie en een afbeelding. Berekent ook een voorspelde baan.
     def __init__(self, pos, vel, angle,image,hitbox_radius = None ,**kwargs):
         hitbox_radius = hitbox_radius or 15
-        super().__init__(pos = pos,image = image ,vel = vel , mass = 100, angle = angle , hitbox_radius= hitbox_radius, **kwargs)
+        super().__init__(pos = pos,image = image ,vel = vel , mass = self.__class__.standard_mass, angle = angle , hitbox_radius= hitbox_radius, **kwargs)
         self.position_estimation = [self.pos for i in range(5)]
         self.hp = self.__class__.max_hp
         self.bullet_ticker = self.__class__.bullet_reload
@@ -610,12 +615,63 @@ class ChunkManager:
         chunk_center += pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
         prefab = random.choice(list(all_prefabs.values()))
         self.all_chunks[chunk] = prefab(chunk_center)
+        
+        delta = pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
+        enemy_manager.spawn_seq(chunk_center+delta)
             
     def update(self):
         self.central_chunk = self.get_chunk(player.pos)
         self.active_chunk_update()
         self.calculate_safezone()
-        
+
+class EnemyManager:
+    min_spawn_dist = 3000
+    max_spawn_dist = 8000
+    max_enemies = 30
+    spawn_ticks = 300 # number of ticks between enemy spawns at difficulty 1
+    def __init__(self):
+        self.all_enemies = all_enemy_types
+        self.weights = [t.spawn_weight for t in self.all_enemies]
+        self.spawn_ticker = self.__class__.spawn_ticks
+        self.difficulty_score = 1 # larger = more difficult
+    def spawn_enemy(self,enemy_type,pos):
+        enemy = enemy_type(pos)
+        active_object.add(enemy)
+        enemies.add(enemy)
+    def get_enemy_type(self):
+        return random.choices(self.all_enemies, weights=self.weights, k=1)[0]
+    def find_spot(self,pos:pygame.Vector2, min_dist = None, max_dist =None):
+        max_dist = max_dist or self.__class__.max_spawn_dist
+        min_dist = min_dist or self.__class__.min_spawn_dist
+        dist = random.uniform(min_dist,max_dist)
+        angle = random.uniform(0,360)
+        delta = pygame.Vector2.from_polar((dist,angle))
+        pos = pygame.Vector2(pos) + delta
+        tester = Predictor(pos, mass = Spaceship.standard_mass)
+        for i in range(5):
+            tester.pre_update()
+            f = tester.force
+            if f.magnitude_squared() < 2000 ** 2 and (pos-player.pos).magnitude_squared() > self.__class__.min_spawn_dist ** 2:
+                return pos
+            f += pygame.Vector2(0.1,0.1)
+            tester.pos -= 10* f / (f*f) ** 0.25
+        return None
+    def spawn_seq(self,start_pos):
+        pos = self.find_spot(start_pos)
+        enemy_type = self.get_enemy_type()
+        if pos == None: return
+        self.spawn_enemy(enemy_type, pos)
+    def update(self):
+        if len(enemies) >= self.__class__.max_enemies: return
+        if self.spawn_ticker <= 0:
+            try:
+                self.spawn_seq(player.pos)
+            except: 
+                print(player.pos)
+            self.spawn_ticker = self.__class__.spawn_ticks
+        else:
+            self.spawn_ticker -= self.difficulty_score
+            
         
         
         
@@ -699,9 +755,7 @@ class Player(Spaceship):
             self.angle_moment += -20
         if keys[pygame.K_SPACE]:
             self.shoot()
-    def angle_dampen(self):
-        self.angle_moment = pygame.math.clamp(self.angle_moment, -150, 150)
-        super().angle_dampen()
+    
     def update(self):
         if not debug_freecam: self.input_check()
         self.pos_estimation_update()
@@ -798,7 +852,7 @@ class BaseEnemy(Spaceship):
         aligned = self.current_heading *desired_heading > 0.7
     
         if braking_dist >= dist * 0.8:
-            # close to overshoot — brake
+            # close to overshoot, brake
             self.decelerate()
         elif vel_toward < self.__class__.min_approach_speed and aligned:
             self.accelerate()
@@ -1178,21 +1232,7 @@ def prefab_satellite_network(pos):
         spawned.append(sat)
     return spawned
 
-def prefab_enemy_patrol(pos):
-    # Kies een willekeurig vijandtype, waarbij spawn_weight bepaalt hoe vaak elk type gekozen wordt
-    types   = all_enemy_types
-    weights = [t.spawn_weight for t in types]
-    chosen  = random.choices(types, weights=weights, k=1)[0]
 
-    # Spawn 2 tot 4 vijanden van hetzelfde type, verspreid rond het middelpunt
-    spawned = []
-    count = random.randint(2, 4)
-    for i in range(count):
-        offset = pygame.Vector2(random.uniform(-300, 300), random.uniform(-300, 300))
-        enemy = chosen(pos=pos + offset)
-        active_object.add(enemy)
-        spawned.append(enemy)
-    return spawned
 
 all_prefabs = {
     'binary':     prefab_binary_planet,
@@ -1201,8 +1241,7 @@ all_prefabs = {
     'black_hole': prefab_black_hole,
     #'triple':     prefab_triple_star, this one is very unstable and should be reworked
     'ringed':     prefab_ringed_planet,
-    'satellite':  prefab_satellite_network,
-    #'enemies':    prefab_enemy_patrol, we'll rework enemy spawning
+    'satellite':  prefab_satellite_network
 }
 #%% Main function
 
@@ -1213,16 +1252,12 @@ def main():
          pos = (random.uniform(100, 400), i * 200)
          active_object.append(Target(pos, size=1.5))
      '''
-    for i in range(20):
-        pos = (random.uniform(100, 400), i * 200)
-        active_object.append(BaseEnemy(pos,angle = 120))
-        
     
     if not debug_freecam:
         active_object.add(player)
    
-    debug_enemy = BaseEnemy(pos = (400,0),vel = (0,100), angle = 180)
-    active_object.add(debug_enemy)
+    #debug_enemy = BaseEnemy(pos = (400,0),vel = (0,100), angle = 180)
+    #active_object.add(debug_enemy)
 
     active_object.add(debug_mass)
     while True: 
@@ -1243,6 +1278,7 @@ def main():
         
         #update world gen
         chunkmanager.update()
+        enemy_manager.update()
         
         # Beweeg alle objecten
         active_object.update()
@@ -1269,7 +1305,7 @@ def main():
 # try-except prevents kernel crash in case of bug, because pygame needs to quit proper 
 pygame.init()
 try:
-    random.seed(1234)
+    #random.seed(1234)
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)   # 90% of screen width
     height = int(info.current_h * 0.9)  # 90% of screen height
@@ -1281,7 +1317,7 @@ try:
     debug = False
     debug_player = False
     debug_planet = False
-    debug_freecam = False
+    debug_freecam =  False
     debug_disable_world_gen = False
     debug_world_gen = False
     debug_enemy = False
@@ -1295,7 +1331,9 @@ try:
     active_object = ActiveObjects()
     bullets = ActiveObjects()
     planets = ActiveObjects()
+    enemies = ActiveObjects()
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
+    enemy_manager = EnemyManager()
     debug_mass = DebugMass()
     main()
 
