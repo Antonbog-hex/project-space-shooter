@@ -170,8 +170,9 @@ class RotatingObject(BasicObject):
         if self.angle_moment < 0: self.angle_moment += 2
 
     def update(self):
-        self.angle += self.angle_moment*timestep
-        if self._is_visual: self.image = pygame.transform.rotozoom(self.base_image, self.angle, 1)
+        new_angle = self.angle + self.angle_moment*timestep
+        if self._is_visual and abs(new_angle- self.angle) > 0.5: self.image = pygame.transform.rotozoom(self.base_image, new_angle, 1)
+        self.angle = new_angle
         super().update()
 
 class Hitbox(BasicObject):
@@ -291,8 +292,10 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
         super().pre_update()
                 
 class Predictor(PhysicsObject):
+    grav_ticker = 1
     def pre_update(self):
         GravityObject.pre_update(self)
+    
     def update(self):
         for obj in active_object:
             if self.hit(obj) and obj != player:
@@ -326,11 +329,14 @@ class Camera(BasicObject):
         self.background_surf = pygame.image.load('graphics/background/Starfield_05-1024x1024.png').convert()
         self.background_rect = self.background_surf.get_rect()
         self.background_pos = pygame.Vector2((0,0))
-        
+        # zooming
         self.zoom_level = 1.0
         self.min_zoom = __class__.min_width / true_width
         self.max_zoom = __class__.max_width / true_width
         self._rebuild_pre_screen()
+        # for LERP on predict
+        self.prev_pos = None
+        
     def _rebuild_pre_screen(self):
         # The pre_screen represents (true_width / zoom) world units
         # but is always rendered at the same pixel size
@@ -358,11 +364,12 @@ class Camera(BasicObject):
         desired_height = (last_pred - target.pos).magnitude() + 50 
         desired_height *= 2
         base_half_h = self.final_screen.get_height() 
-            
+          
         required_zoom =  desired_height/base_half_h if desired_height > 0 else self.base_zoom
         required_zoom = pygame.math.clamp(required_zoom, self.min_zoom, self.max_zoom)
-        self.zoom_level += (required_zoom - self.zoom_level) * 0.05 # LERP zoom
-        self._rebuild_pre_screen()  
+        if abs(required_zoom- self.zoom_level) > 0.01:
+            self.zoom_level += (required_zoom - self.zoom_level) * 0.05 # LERP zoom
+            self._rebuild_pre_screen()  
     def background_draw(self):
         # Tegelt de achtergrondafbeelding zodat hij oneindig groot lijkt.
         self.pre_screen.fill((0,0,0))
@@ -402,7 +409,7 @@ class Camera(BasicObject):
                 pygame.draw.line(self.pre_screen, 'orange', pos, pos+v)
             if sprite._is_target:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
-            if sprite._is_enemy:
+            if sprite._is_enemy and debug_enemy:
                 pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 800)
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
                 if sprite.desired_heading != None:
@@ -416,8 +423,15 @@ class Camera(BasicObject):
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
     def player_predict_draw(self):
         # Tekent de voorspelde baan van de speler als witte stippen
-        for pos in player.position_estimation:
-            pygame.draw.circle(self.pre_screen, 'white', pos - self.pos + self.offset , 4) 
+        if self.prev_pos == None: self.prev_pos = player.position_estimation
+        new_pos_l = []
+        for i, pos in enumerate(player.position_estimation):
+            prev_pos = self.prev_pos[i]
+            new_pos = prev_pos + (pos - prev_pos)*0.1
+            new_pos_l.append(new_pos)
+            pygame.draw.circle(self.pre_screen, 'white', new_pos - self.pos + self.offset , 4)
+        self.prev_predict = new_pos_l
+            
     def draw(self, group):
         if not hasattr(group, '__iter__'):
             group = [group]
@@ -452,7 +466,10 @@ class Camera(BasicObject):
         
     def finalise(self):
         # Schaal de pre_screen naar het echte venster en toon hem
-        scaled = pygame.transform.rotozoom(self.pre_screen, 0, self.scaler)
+        target_w = int(self.pre_screen.get_width() * self.scaler)
+        target_h = int(self.pre_screen.get_height() * self.scaler)
+        scaled = pygame.transform.scale(self.pre_screen, (target_w, target_h))
+        #scaled = pygame.transform.rotozoom(self.pre_screen, 0, self.scaler)
         x = (self.final_screen.get_width() - scaled.get_width()) // 2
         y = (self.final_screen.get_height() - scaled.get_height()) // 2
         self.final_screen.blit(scaled, (x, y))
@@ -475,17 +492,14 @@ class Camera(BasicObject):
 class BaseBullet(PhysicsObject, VisualObject):
 # Een kogel die het schip afvuurt.
     damage = 1
-    speed = 1000
+    speed = 700
     lifetime = 180
     radius = 4
     texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
-    
-    mass = 1
+    pygame.draw.circle(texture,(214, 37, 28), (radius, radius), radius)
+    mass = 8
     def __init__(self, pos, vel, source):
-        # Maak een klein oranje cirkeltje als afbeelding voor de kogel
-        radius = self.__class__.radius
-        pygame.draw.circle(self.__class__.texture,(255, 180, 50), (radius, radius), radius)
-        super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=radius,image=self.__class__.texture)
+        super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=self.__class__.radius,image=self.__class__.texture)
         self.source = source
         self.lifetime = self.__class__.lifetime   # frames it lives
     def check_collisions(self):
@@ -513,7 +527,16 @@ class BaseBullet(PhysicsObject, VisualObject):
         self.check_collisions()
         super().update()
 class Bullet(BaseBullet):
-    pass                
+    #legacy to be fased out
+    pass   
+class SniperBullet(BaseBullet):
+    damage = 3
+    speed = 2800
+    lifetime = 300
+    radius = 5
+    texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
+    pygame.draw.circle(texture,(224, 196, 11), (radius, radius), radius)
+    mass = 4 
 class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     pos_estim_step_size = 20# number of frames that get predicted per step
     max_hp = 1
@@ -549,12 +572,12 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     def take_damage(self, amount=1):
         self.hp -= amount
         if self.hp <= 0:
-            menu.active = True
-            menu.is_death_screen = True
+            #menu.active = True
+            #menu.is_death_screen = True
             self.kys()
     def shoot(self):
         if self.bullet_ticker > 0 : return
-        bullet = __class__.bullet_type(self.pos,self.vel + self.current_heading * self.__class__.bullet_type.speed,self)
+        bullet = self.__class__.bullet_type(self.pos,self.vel + self.current_heading * self.__class__.bullet_type.speed,self)
         bullets.add(bullet)      
         self.bullet_ticker = self.__class__.bullet_reload         
     def collision_check(self):
@@ -652,6 +675,7 @@ class EnemyManager:
         self.spawn_ticker = self.__class__.spawn_ticks
         self.difficulty_score = 1 # larger = more difficult
     def spawn_enemy(self,enemy_type,pos):
+        if debug_disable_enemy_spawn: return
         enemy = enemy_type(pos)
         active_object.add(enemy)
         enemies.add(enemy)
@@ -674,6 +698,7 @@ class EnemyManager:
             tester.pos -= 10* f / (f*f) ** 0.25
         return None
     def spawn_seq(self,start_pos):
+        if debug_disable_enemy_spawn: return
         pos = self.find_spot(start_pos)
         enemy_type = self.get_enemy_type()
         if pos == None: return
@@ -688,6 +713,7 @@ class EnemyManager:
             self.spawn_ticker = self.__class__.spawn_ticks
         else:
             self.spawn_ticker -= self.difficulty_score
+
 
 class ScoreManager:
     def __init__(self):
@@ -797,6 +823,7 @@ class Planet(PhysicsObject,VisualObject):
         
         super().update()   
 class Player(Spaceship):
+    bullet_type = SniperBullet
     bullet_reload = 15
     max_hp = 15
     grav_ticker = 1
@@ -811,7 +838,7 @@ class Player(Spaceship):
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP] or keys[pygame.K_w]:
             
-            if self.vel * self.current_heading < 300:
+            if self.vel * self.current_heading < self.__class__.speed:
                 self.accelerate()
             else:
                 perp = self.vel.rotate(90).normalize()
@@ -972,7 +999,9 @@ class BaseEnemy(Spaceship):
         else:
            self.accelerate()
     def avoid_collisions(self):
-        predict_pos = self.next_pos(steps = self.__class__.time_in_advance * fps) # from MovingObject
+
+        predict_pos = self.next_pos(steps = self.__class__.time_in_advance / timestep) # from MovingObject
+
         linetest = LineHitbox(self.pos, predict_pos)
         swerving = False
         for planet in planets:
@@ -1110,22 +1139,39 @@ class BaseEnemy(Spaceship):
 
 class Enemy1(BaseEnemy):
     # Snel maar lage hp
-    hp           = 3
     max_hp       = 3
     speed        = 600
-    damage       = 20
     spawn_weight = 2   # spawnt vaker dan EnemyBrute
 
 class Enemy2(BaseEnemy):
     # Traag maar hoge hp
-    hp           = 8
     max_hp       = 8
     speed        = 180
     damage       = 40
     spawn_weight = 1   # spawnt het minst vaak
-
+class SniperEnemy(BaseEnemy):
+    # Dit is een basis vijand, alle andere vijanden erven hiervan
+    # Verander deze waarden in de subklassen om een ander type vijand te maken
+    spawn_weight = 3      # hoe groter, hoe vaker dit type spawnt - to be implemented
+    bullet_type = Bullet
+    bullet_reload = 300 # ticks to reload
+    image_path = 'graphics/enemies/enemy_3.png' 
+    hitbox_radius = 25
+    max_hp = 2
+    # navigate_to_point
+    perp_correction_cutoff = 100 # perp vel at which correction starts
+    # check_visual (player finding)
+    max_player_dist = 3500 # distance at which player if fully forgotten
+    # player interact
+    approach_dist = 1200 # distance beyond which the enemy approaches
+    max_rel_vel = 1000 # maximum relative velocity before correcting
+    pre_aim_ticks = 50 # ammount of ticks ahead of shooting the enemy starts to aim 
+    speed = 350
+    bullet_type = SniperBullet
+    
+    
 # Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
-all_enemy_types = [BaseEnemy, Enemy1, Enemy2]
+all_enemy_types = [BaseEnemy, Enemy1, Enemy2, SniperEnemy]
 
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
@@ -1329,6 +1375,7 @@ def reset_game():
 #%% Main function
 
 def main():
+    #global timestep
     # Spawn targets éénmalig vóór de loop
     ''' 
      for i in range(3):
@@ -1339,9 +1386,10 @@ def main():
     if not debug_freecam:
         active_object.add(player)
    
-    #debug_enemy = BaseEnemy(pos = (400,0),vel = (0,100), angle = 180)
-    #active_object.add(debug_enemy)
-
+    debug_enemy = SniperEnemy(pos = (400,0),vel = (0,100), angle = 180)
+    active_object.add(debug_enemy)
+    enemies.add(debug_enemy)
+    
     active_object.add(debug_mass)
     while True: 
         
@@ -1357,12 +1405,11 @@ def main():
                     prefab_binary_planet(camera.pos)
                 if event.key == pygame.K_o:
                     simpel_planet_spawn(camera.pos,vel=(0,0))
-                
+              
         
         #update world gen
         chunkmanager.update()
         enemy_manager.update()
-        
         # Beweeg alle objecten
         active_object.update()
         bullets.update()
@@ -1381,7 +1428,9 @@ def main():
             camera.debug_draw(active_object)
         camera.finalise()
         pygame.display.update()
-        clock.tick(fps)
+        dt = clock.tick(fps) / 1000
+        #timestep = dt
+        
         
 
 #%% actually what runs 
@@ -1397,13 +1446,14 @@ try:
     true_width = 3000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = False
-    debug_player = False
+    debug = True
+    debug_player = True
     debug_planet = False
     debug_freecam =  False
     debug_disable_world_gen = False
     debug_world_gen = False
     debug_enemy = False
+    debug_disable_enemy_spawn = True
     
     player = Player(pos=(0,0),vel=(0,200),angle= 0)
     camera = Camera(screen)
@@ -1417,7 +1467,11 @@ try:
     enemies = ActiveObjects()
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
     enemy_manager = EnemyManager()
+    score_manager = ScoreManager()
     debug_mass = DebugMass()
+    #import cProfile
+    #cProfile.run('main()', sort='cumulative')
+    # handy for seeing performance impact
     main()
 
 # Fix voor MacOS
