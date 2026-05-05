@@ -431,13 +431,25 @@ class Camera(BasicObject):
                 bar_width  = 40
                 bar_height = 5
                 center_pos = sprite.pos - self.pos + self.offset
-    
                 bg_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, bar_width, bar_height)
                 pygame.draw.rect(self.pre_screen, (150, 0, 0), bg_rect)
-    
                 hp_fraction = sprite.hp / sprite.max_hp
                 hp_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, int(bar_width * hp_fraction), bar_height)
                 pygame.draw.rect(self.pre_screen, (0, 200, 0), hp_rect)
+
+    def draw_player_hp(self, player):
+        # HP balk linksonder op het echte scherm
+        bar_w = 200
+        bar_h = 18
+        x = 15
+        y = self.final_screen.get_height() - 35
+        pygame.draw.rect(self.final_screen, (100, 0, 0), (x, y, bar_w, bar_h), border_radius=4)
+        fraction = max(0, player.hp / player.max_hp)
+        pygame.draw.rect(self.final_screen, (0, 180, 0), (x, y, int(bar_w * fraction), bar_h), border_radius=4)
+        pygame.draw.rect(self.final_screen, (255, 255, 255),(x, y, bar_w, bar_h), width=1, border_radius=4)
+        label = pygame.font.SysFont('Arial', 14).render(f'HP  {player.hp}/{player.max_hp}', True, (255,255,255))
+        self.final_screen.blit(label, (x + 5, y + 2))
+        
     def finalise(self):
         # Schaal de pre_screen naar het echte venster en toon hem
         scaled = pygame.transform.rotozoom(self.pre_screen, 0, self.scaler)
@@ -485,7 +497,10 @@ class BaseBullet(PhysicsObject, VisualObject):
                     obj.kys()
                     self.kys()
                 elif obj._is_enemy:
+                    old_hp = obj.hp
                     obj.take_damage(self.__class__.damage)
+                    if old_hp > 0 and obj.hp <= 0:
+                        score_manager.add_score(100)
                     self.kys()
                 elif obj._is_player:
                     print('player hit !')
@@ -534,7 +549,9 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     def take_damage(self, amount=1):
         self.hp -= amount
         if self.hp <= 0:
-            self.kys()  
+            menu.active = True
+            menu.is_death_screen = True
+            self.kys()
     def shoot(self):
         if self.bullet_ticker > 0 : return
         bullet = __class__.bullet_type(self.pos,self.vel + self.current_heading * self.__class__.bullet_type.speed,self)
@@ -671,10 +688,61 @@ class EnemyManager:
             self.spawn_ticker = self.__class__.spawn_ticks
         else:
             self.spawn_ticker -= self.difficulty_score
-            
+
+class ScoreManager:
+    def __init__(self):
+        self.score = 0
+        self.high_score = 0
+        self.font = pygame.font.SysFont('Arial', 28)
+        self.small_font = pygame.font.SysFont('Arial', 18)
+
+    def add_score(self, amount):
+        self.score += amount
+        if self.score > self.high_score:
+            self.high_score = self.score
+
+    def reset(self):
+        self.score = 0
+
+    def draw(self, screen):
+        score = self.font.render(f'Score: {self.score}', True, (255, 255, 255))
+        best_score = self.small_font.render(f'Beste: {self.high_score}', True, (180, 180, 180))
+        screen.blit(score, (15, 15))
+        screen.blit(best_score, (15, 50))    
         
-        
-        
+class Menu:
+    def __init__(self, screen):
+        self.screen = screen
+        self.font_big = pygame.font.SysFont('Arial', 64, bold=True)
+        self.font_med = pygame.font.SysFont('Arial', 36)
+        self.font_small = pygame.font.SysFont('Arial', 24)
+        self.active = True # True = menu wordt getoond
+        self.is_death_screen = False
+
+    def draw(self, high_score=0, last_score=0):
+        overlay = pygame.Surface(self.screen.get_size()).convert_alpha()
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        if self.is_death_screen:
+            title = self.font_big.render('GAME OVER', True, (220, 60, 60))
+            score_line = self.font_med.render(f'Score: {last_score}', True, (255, 255, 255))
+            hi_line = self.font_med.render(f'Beste:  {high_score}', True, (180, 180, 180))
+            prompt = self.font_small.render('Druk ENTER om opnieuw te spelen | ESC om te stoppen', True, (200, 200, 200))
+        else:
+            title  = self.font_big.render('SPACE GAME', True, (100, 180, 255))
+            score_line = self.font_med.render('', True, (0,0,0))      # leeg
+            hi_line    = self.font_med.render(f'Best:  {high_score}', True, (180, 180, 180))
+            prompt     = self.font_small.render('Druk ENTER om te starten | ESC om te stoppen', True, (200, 200, 200))
+
+        center_x = self.screen.get_width() // 2
+        center_y = self.screen.get_height() // 2
+
+        self.screen.blit(title, title.get_rect(center=(center_x, center_y - 120)))
+        self.screen.blit(score_line, score_line.get_rect(center=(center_x, center_y - 30)))
+        self.screen.blit(hi_line, hi_line.get_rect(center=(center_x, center_y + 20)))
+        self.screen.blit(prompt, prompt.get_rect(center=(center_x, center_y + 100)))
+
 # %% finished classes
 class Planet(PhysicsObject,VisualObject):
     # Een planeet: heeft een afbeelding, massa (gebaseerd op dichtheid+grootte) en botst elastisch met andere planeten.
@@ -1243,6 +1311,21 @@ all_prefabs = {
     'ringed':     prefab_ringed_planet,
     'satellite':  prefab_satellite_network
 }
+
+def reset_game():
+    global player, active_object, bullets, planets, enemies, chunkmanager, enemy_manager
+    active_object = ActiveObjects()
+    bullets       = ActiveObjects()
+    planets       = ActiveObjects()
+    enemies       = ActiveObjects()
+    chunkmanager  = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
+    enemy_manager = EnemyManager()
+    player        = Player(pos=(0, 0), vel=(0, 200), angle=0)
+    score_manager.reset()
+    active_object.add(player)
+    active_object.add(debug_mass)
+    camera.pos = pygame.Vector2(0, 0)
+    camera.zoom(1.0)
 #%% Main function
 
 def main():
