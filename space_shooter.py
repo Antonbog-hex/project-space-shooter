@@ -461,8 +461,6 @@ class Camera(BasicObject):
         fraction = max(0, player.hp / player.max_hp)
         pygame.draw.rect(self.final_screen, (0, 180, 0), (x, y, int(bar_w * fraction), bar_h), border_radius=4)
         pygame.draw.rect(self.final_screen, (255, 255, 255),(x, y, bar_w, bar_h), width=1, border_radius=4)
-        label = pygame.font.SysFont('Arial', 14).render(f'HP  {player.hp}/{player.max_hp}', True, (255,255,255))
-        self.final_screen.blit(label, (x + 5, y + 2))
         
     def finalise(self):
         # Schaal de pre_screen naar het echte venster en toon hem
@@ -572,8 +570,9 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     def take_damage(self, amount=1):
         self.hp -= amount
         if self.hp <= 0:
-            #menu.active = True
-            #menu.is_death_screen = True
+            if self._is_player:
+                menu.active = True
+                menu.is_death_screen = True
             self.kys()
     def shoot(self):
         if self.bullet_ticker > 0 : return
@@ -813,6 +812,13 @@ class Planet(PhysicsObject,VisualObject):
                 if sprite._is_planet:
                     self.elastic_collision(sprite,energy_dis= 0.9)
                 if sprite._is_spaceship:
+                    direction = sprite.pos - self.pos
+                    collision_normal = direction.normalize()
+                    relative_velocity = sprite.vel - self.vel
+                    impact_speed = abs(relative_velocity.dot(collision_normal))
+                    damage = int(impact_speed / 150)  # pas 150 aan voor meer of minder schade; 150 px/s = 1 HP
+                    if damage > 0:
+                        sprite.take_damage(damage)
                     self.elastic_collision(sprite,energy_dis= 1.5)
               
     def pre_update(self):
@@ -1382,54 +1388,66 @@ def main():
          pos = (random.uniform(100, 400), i * 200)
          active_object.append(Target(pos, size=1.5))
      '''
-    
-    if not debug_freecam:
-        active_object.add(player)
-   
-    debug_enemy = SniperEnemy(pos = (400,0),vel = (0,100), angle = 180)
-    active_object.add(debug_enemy)
-    enemies.add(debug_enemy)
-    
-    active_object.add(debug_mass)
-    while True: 
-        
+    while True:
         for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+            if event.type == pygame.QUIT:
                 pygame.quit()
-                raise SystemExit #fix voor macOS
-            
+                raise SystemExit
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                if menu.active:
+                    pygame.quit()
+                    raise SystemExit
+                else:
+                    menu.active = True
+                    menu.is_death_screen = False
+    
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
-                    simpel_planet_spawn(player.pos,vel = (0,0))
-                if event.key == pygame.K_p:
+                    if menu.active:
+                        menu.active = False
+                        reset_game()
+                        debug_enemy_obj = SniperEnemy(pos=(400, 0), vel=(0, 100), angle=180)
+                        active_object.add(debug_enemy_obj)
+                        enemies.add(debug_enemy_obj)
+                    else:
+                        simpel_planet_spawn(player.pos, vel=(0, 0))
+                if event.key == pygame.K_p and not menu.active:
                     prefab_binary_planet(camera.pos)
-                if event.key == pygame.K_o:
-                    simpel_planet_spawn(camera.pos,vel=(0,0))
-              
-        
-        #update world gen
+                if event.key == pygame.K_o and not menu.active:
+                    simpel_planet_spawn(camera.pos, vel=(0, 0))
+    
+        if menu.active:
+            camera.background_draw()
+            camera.finalise()
+            menu.draw(high_score=score_manager.high_score, last_score=score_manager.score)
+            pygame.display.update()
+            clock.tick(fps)
+            continue
+    
         chunkmanager.update()
         enemy_manager.update()
-        # Beweeg alle objecten
         active_object.update()
         bullets.update()
-        # Beweeg de camera
+    
         if debug_freecam:
             camera.freecam()
             player.pos = camera.pos
         else:
             camera.track(player)
-        # Teken alles
+    
         camera.background_draw()
         camera.draw(active_object)
-        camera.draw(bullets) 
+        camera.draw(bullets)
         camera.player_predict_draw()
         if debug:
             camera.debug_draw(active_object)
         camera.finalise()
+        score_manager.draw(camera.final_screen)
+        camera.draw_player_hp(player)
+        if not menu.active:
+            camera.draw_player_hp(player)
         pygame.display.update()
-        dt = clock.tick(fps) / 1000
-        #timestep = dt
+        clock.tick(fps)
         
         
 
@@ -1468,6 +1486,7 @@ try:
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
     enemy_manager = EnemyManager()
     score_manager = ScoreManager()
+    menu = Menu(screen)
     debug_mass = DebugMass()
     #import cProfile
     #cProfile.run('main()', sort='cumulative')
