@@ -1471,7 +1471,7 @@ try:
     debug_disable_world_gen = False
     debug_world_gen = False
     debug_enemy = False
-    debug_disable_enemy_spawn = True
+    debug_disable_enemy_spawn = False
     
     player = Player(pos=(0,0),vel=(0,200),angle= 0)
     camera = Camera(screen)
