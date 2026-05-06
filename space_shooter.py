@@ -14,7 +14,7 @@ class BasicObject():
         self.pos = pygame.math.Vector2(pos)
         self._is_moving = isinstance(self, MovingObject)
         self._is_visual = isinstance(self, VisualObject)
-    
+        self._is_physics  = isinstance(self,PhysicsObject)
     def update(self):
         pass # Lege methode, zodat super().update() altijd werkt
 
@@ -246,8 +246,8 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
         self._is_predictor = isinstance(self, Predictor)
         self._is_target = isinstance(self, Target)
         self._is_player = isinstance(self, Player)
-        self._is_physics  = True
-    def elastic_collision(self, other,energy_dis = 1, reflective = True):
+        
+    def elastic_collision(self, other,energy_dis = 1, reflective = True , damage_multiplier = 0):
          """
         Verwerkt een elastische botsing tussen dit object en "other".
         energy_dis < 1 = energie gaat verloren (inelastisch)
@@ -270,15 +270,23 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
         
          # Elastic impulse scalar
          impulse = (2 * vel_along_normal) / (self.mass + other.mass)
+         
+         
+         if damage_multiplier != 0:
+             damage = int(vel_along_normal/100 - 4)  * damage_multiplier  # pas 100 aan voor meer of minder schade; 100 px/s = 1 HP
+             if damage > 0:
+                 if self._is_spaceship: self.take_damage(damage)
+                 if other._is_spaceship: other.take_damage(damage)
+         
          impulse = impulse * energy_dis
-
          # Apply impulse
          self.vel -= impulse * other.mass * normal
          self.pos += normal*0.51*overlap
 
          if other._is_moving and reflective:
              other.vel += impulse * self.mass * normal
-             other.pos -= normal*0.51*overlap       
+             other.pos -= normal*0.51*overlap
+        
     def pre_update(self):
         if not chunkmanager.in_safezone(self.pos):
             try:
@@ -290,7 +298,55 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
             finally:
                 self.kys()
         super().pre_update()
-                
+class ParticleEffect(VisualObject):
+    image = pygame.Surface((10,10))
+    def __init__(self, pos,duration = 10):
+        super().__init__(pos = pos, image= self.__class__.image)
+        self.ticker = duration
+        super().update()
+    def update_image(self):
+        pass        
+    def update(self):
+        self.update_image()
+        self.ticker -= 1
+        if self.ticker <= 0: self.kys()
+    def kys(self):
+        particle_effects.remove(self)
+class ExplosionEffect(ParticleEffect):
+    
+    
+    def __init__(self, pos, radius=30, duration = 60):
+        self.radius = radius
+        self.duration = duration
+        super().__init__(pos=pos,duration = duration)
+    
+    def update_image(self):
+        progress = 1 - (self.ticker / self.duration)  # 0 to 1
+        current_radius = int(self.radius * (1 + progress * 2))
+        alpha = int(255 * (1 - progress))
+        red = 255
+        green = int(200 * (1 - progress))
+        
+        size = current_radius * 2
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, (red, green, 0, alpha), (current_radius, current_radius), current_radius)
+class TrailParticle(ParticleEffect):
+    duration = 20
+    
+    def __init__(self, pos, radius=6, color=(255, 140, 0)):
+        self.radius = radius
+        self.color = color
+        super().__init__(pos=pos, duration=self.__class__.duration)
+    
+    def update_image(self):
+        if not hasattr(self, 'radius'): return
+        progress = 1 - (self.ticker / self.__class__.duration)
+        alpha = int(255 * (1 - progress))
+        current_radius = max(1, int(self.radius * (1 - progress * 0.7)))
+        
+        size = current_radius * 2
+        self.image = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, (*self.color, alpha), (current_radius, current_radius), current_radius)          
 class Predictor(PhysicsObject):
     grav_ticker = 1
     def pre_update(self):
@@ -298,7 +354,7 @@ class Predictor(PhysicsObject):
     
     def update(self):
         for obj in active_object:
-            if self.hit(obj) and obj != player:
+            if self.hit(obj) and obj._is_physics:
                 self.elastic_collision(obj,energy_dis=1.1,reflective=False)
         super().update()
 
@@ -436,20 +492,22 @@ class Camera(BasicObject):
         if not hasattr(group, '__iter__'):
             group = [group]
         for sprite in group:
+            if not sprite._is_visual: continue
             pos = sprite.get_frame_pos() - self.pos + self.offset
             self.pre_screen.blit(sprite.image, pos)
             ''' 
             !!! to be changed with seperate class !!!
             '''
-            if sprite._is_enemy:
-                bar_width  = 40
-                bar_height = 5
-                center_pos = sprite.pos - self.pos + self.offset
-                bg_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, bar_width, bar_height)
-                pygame.draw.rect(self.pre_screen, (150, 0, 0), bg_rect)
-                hp_fraction = sprite.hp / sprite.max_hp
-                hp_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, int(bar_width * hp_fraction), bar_height)
-                pygame.draw.rect(self.pre_screen, (0, 200, 0), hp_rect)
+    def draw_enemy_healthbar(self,enemy_list):
+        for sprite in enemy_list:
+            bar_width  = 40
+            bar_height = 5
+            center_pos = sprite.pos - self.pos + self.offset
+            bg_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, bar_width, bar_height)
+            pygame.draw.rect(self.pre_screen, (150, 0, 0), bg_rect)
+            hp_fraction = sprite.hp / sprite.max_hp
+            hp_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, int(bar_width * hp_fraction), bar_height)
+            pygame.draw.rect(self.pre_screen, (0, 200, 0), hp_rect)
 
     def draw_player_hp(self, player):
         # HP balk linksonder op het echte scherm
@@ -503,6 +561,7 @@ class BaseBullet(PhysicsObject, VisualObject):
     def check_collisions(self):
         for obj in active_object:
             if obj != self.source and self.hit(obj):
+                if not obj._is_physics: continue
                 if obj._is_planet:
                     self.kys()
                 elif obj._is_target:
@@ -515,7 +574,6 @@ class BaseBullet(PhysicsObject, VisualObject):
                         score_manager.add_score(100)
                     self.kys()
                 elif obj._is_player:
-                    print('player hit !')
                     obj.take_damage(self.__class__.damage)
                     self.kys()
     def update(self):
@@ -541,7 +599,7 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     bullet_type = Bullet
     speed =  500
     bullet_reload = 30
-    
+    theme_colour = None
     standard_mass = 100
     # Een ruimteschip: combineert physics, rotatie en een afbeelding. Berekent ook een voorspelde baan.
     def __init__(self, pos, vel, angle,image,hitbox_radius = None ,**kwargs):
@@ -553,8 +611,10 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle)) # direction of pointing normvector
     def accelerate(self):
         self.acc = self.current_heading * self.speed + self.force / self.mass
+        particle_effects.add(TrailParticle(self.pos - self.current_heading * self.hitbox_radius * 0.8 , color = self.__class__.theme_colour))
     def decelerate(self):
         self.acc =  - self.current_heading * self.speed * 0.5 + self.force / self.mass
+        
     def pos_estimation_update(self,steps=5):
         # Simuleert de toekomstige baan door een kopie van het schip vooruit te bewegen zonder het echte schip aan te passen.
         active_object.remove(self)
@@ -573,30 +633,34 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
             if self._is_player:
                 menu.active = True
                 menu.is_death_screen = True
+            active_object.add(Explosion(self.pos, self.hitbox_radius * 0.8, 60))
             self.kys()
     def shoot(self):
         if self.bullet_ticker > 0 : return
         bullet = self.__class__.bullet_type(self.pos,self.vel + self.current_heading * self.__class__.bullet_type.speed,self)
         bullets.add(bullet)      
         self.bullet_ticker = self.__class__.bullet_reload         
-    def collision_check(self):
+    def resolve_collisions(self):
         # Controleer of het schip een planeet raakt en stuit dan terug.
         for sprite in active_object:
-            if id(sprite) < id (self) and self.hit(sprite):
+            if not sprite._is_physics: continue
+            if self.hit(sprite): # you cannot use id here because planets never check for collisions with spaceships
                 if sprite._is_planet:
-                    self.elastic_collision(sprite,energy_dis= 1.1)
+                    self.elastic_collision(sprite,energy_dis= 1.1, damage_multiplier= 1)
                 if sprite._is_spaceship:
-                    self.elastic_collision(sprite, energy_dis = 1.4)
+                    self.elastic_collision(sprite, energy_dis = 1.4, damage_multiplier= 1)
+   
     def _orientation_update(self):
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
     def update(self):
         if self.bullet_ticker > 0 : self.bullet_ticker -= 1
         self.angle_dampen()
-        self.collision_check()
+        self.resolve_collisions()
         super().update()
     def pre_update(self):
         self._orientation_update()
         super().pre_update()
+
 class ChunkManager:
     def __init__(self,chunk_size = (2000,2000),around_chunks = 1):
         self.chunk_size = chunk_size
@@ -712,8 +776,6 @@ class EnemyManager:
             self.spawn_ticker = self.__class__.spawn_ticks
         else:
             self.spawn_ticker -= self.difficulty_score
-
-
 class ScoreManager:
     def __init__(self):
         self.score = 0
@@ -806,21 +868,12 @@ class Planet(PhysicsObject,VisualObject):
         return image     
 
     def resolve_collisions(self):
-        # Controleer botsingen met andere planeten (id-check voorkomt dubbele afhandeling)
-        for sprite in active_object:
-            if id(sprite)< id(self) and self.hit(sprite):
-                if sprite._is_planet:
-                    self.elastic_collision(sprite,energy_dis= 0.9)
-                if sprite._is_spaceship:
-                    direction = sprite.pos - self.pos
-                    collision_normal = direction.normalize()
-                    relative_velocity = sprite.vel - self.vel
-                    impact_speed = abs(relative_velocity.dot(collision_normal))
-                    damage = int(impact_speed / 150)  # pas 150 aan voor meer of minder schade; 150 px/s = 1 HP
-                    if damage > 0:
-                        sprite.take_damage(damage)
-                    self.elastic_collision(sprite,energy_dis= 1.5)
-              
+        # Controleer botsingen met andere planeten, (id-check voorkomt dubbele afhandeling)
+        # spaceship botsingen worden afgehandeld in spaceship
+        for planet in planets:
+            if id(planet)< id(self) and self.hit(planet):
+                self.elastic_collision(planet,energy_dis= 0.9)
+               
     def pre_update(self):
         if self._is_moving:
             self.resolve_collisions()
@@ -833,9 +886,10 @@ class Player(Spaceship):
     bullet_reload = 15
     max_hp = 15
     grav_ticker = 1
+    theme_colour = (53, 114, 212)
+    speed = 750
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
-        self.shoot_cooldown = 0
         super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image = self.base_image
@@ -843,12 +897,8 @@ class Player(Spaceship):
         # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP] or keys[pygame.K_w]:
+            self.accelerate()
             
-            if self.vel * self.current_heading < self.__class__.speed:
-                self.accelerate()
-            else:
-                perp = self.vel.rotate(90).normalize()
-                self.acc += self.speed * (self.current_heading  * perp) * perp
                 
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             self.angle_moment += 20
@@ -859,11 +909,10 @@ class Player(Spaceship):
     
     def update(self):
         if not debug_freecam: self.input_check()
+        self.vel = self.vel.clamp_magnitude(self.__class__.speed)
         self.pos_estimation_update()
         super().update()
-        if self.shoot_cooldown > 0:
-            self.shoot_cooldown -= 1
-    
+   
 class BaseEnemy(Spaceship):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
@@ -1142,19 +1191,23 @@ class BaseEnemy(Spaceship):
         if self.bullet_ticker < self.__class__.pre_aim_ticks:
             self.aim(self.get_pos_pred(player))
             if self.bullet_ticker == 0: self.shoot()
-
-class Enemy1(BaseEnemy):
-    # Snel maar lage hp
-    max_hp       = 3
-    speed        = 600
-    spawn_weight = 2   # spawnt vaker dan EnemyBrute
-
-class Enemy2(BaseEnemy):
-    # Traag maar hoge hp
-    max_hp       = 8
-    speed        = 180
-    damage       = 40
-    spawn_weight = 1   # spawnt het minst vaak
+class Explosion(CircularHitbox):
+    damage = 3
+    def __init__(self,pos,radius,duration):
+        self.duration = duration
+        super().__init__(pos=pos,radius  = radius)
+        self.hit_list = []
+        particle_effects.add(ExplosionEffect(self.pos,self.hitbox_radius,self.duration))
+    def update(self):
+        for element in enemies + [player]:
+            if (not element in self.hit_list) and self.hit(element):
+                self.hit_list.append(element)
+                element.take_damage(self.__class__.damage)
+        self.duration -= 1
+        if self.duration <= 0: self.kys()
+class BasicBrute(BaseEnemy):
+    theme_colour = (199, 59, 28)
+    spawn_weight = 5
 class SniperEnemy(BaseEnemy):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
@@ -1170,14 +1223,45 @@ class SniperEnemy(BaseEnemy):
     max_player_dist = 3500 # distance at which player if fully forgotten
     # player interact
     approach_dist = 1200 # distance beyond which the enemy approaches
-    max_rel_vel = 1000 # maximum relative velocity before correcting
+    max_rel_vel = 500 # maximum relative velocity before correcting
     pre_aim_ticks = 50 # ammount of ticks ahead of shooting the enemy starts to aim 
     speed = 350
     bullet_type = SniperBullet
-    
-    
+    theme_colour = (212, 178, 53)
+    def back_up(self , player):
+        player_vect = player.pos - self.pos
+        if self.current_heading * player_vect < 0:
+            self.accelerate()
+        else: self.decelerate()
+        self.turn_to(player_vect)
+    def player_interact(self):
+        if (self.pos - player.pos).magnitude_squared() < 600 ** 2:
+            self.back_up(player)
+        super().player_interact()
+class SuicideEnemy(BaseEnemy):
+    # Dit is een basis vijand, alle andere vijanden erven hiervan
+    # Verander deze waarden in de subklassen om een ander type vijand te maken
+    spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt - to be implemented
+    bullet_type = Bullet
+    bullet_reload = 180 # ticks to reload
+    image_path = 'graphics/enemies/enemy_4.png' 
+    hitbox_radius = 25
+    max_hp = 2
+    explosion_size = 120
+    # navigate_to_point
+    min_approach_speed = 500
+    # check_visual (player finding)
+    visual_cone_angle = 90 # degrees of visual cone
+    theme_colour = (28, 199, 193)
+    def player_interact(self):
+        self.navigate_to_point(player.pos)
+        if (player.pos - self.pos).magnitude_squared() < (self.__class__.explosion_size * 0.9) ** 2:
+            self.detonate()
+    def detonate(self):
+        active_object.add(Explosion(self.pos,duration = 120,radius = self.__class__.explosion_size))
+        self.kys()
 # Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
-all_enemy_types = [BaseEnemy, Enemy1, Enemy2, SniperEnemy]
+all_enemy_types = [ BasicBrute, SniperEnemy,SuicideEnemy]
 
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
@@ -1199,9 +1283,6 @@ class DebugMass(PhysicsObject,VisualObject):
             self.vel = pygame.Vector2(0)
         super().update()
                    
-    
-
-
 class Target(PhysicsObject, VisualObject):
 # Een doelobject om op te schieten.
 
@@ -1406,15 +1487,17 @@ def main():
                     if menu.active:
                         menu.active = False
                         reset_game()
-                        debug_enemy_obj = SniperEnemy(pos=(400, 0), vel=(0, 100), angle=180)
+                        # debug
+                        debug_enemy_obj = SuicideEnemy(pos=(400, 0), vel=(0, 100), angle=180)
                         active_object.add(debug_enemy_obj)
                         enemies.add(debug_enemy_obj)
                     else:
                         simpel_planet_spawn(player.pos, vel=(0, 0))
                 if event.key == pygame.K_p and not menu.active:
-                    prefab_binary_planet(camera.pos)
+                    active_object.add(Explosion(camera.pos,duration = 120, radius = 50))
                 if event.key == pygame.K_o and not menu.active:
                     simpel_planet_spawn(camera.pos, vel=(0, 0))
+
     
         if menu.active:
             camera.background_draw()
@@ -1428,6 +1511,7 @@ def main():
         enemy_manager.update()
         active_object.update()
         bullets.update()
+        particle_effects.update()
     
         if debug_freecam:
             camera.freecam()
@@ -1436,8 +1520,10 @@ def main():
             camera.track(player)
     
         camera.background_draw()
+        camera.draw(particle_effects)
         camera.draw(active_object)
         camera.draw(bullets)
+        camera.draw_enemy_healthbar(enemies)
         camera.player_predict_draw()
         if debug:
             camera.debug_draw(active_object)
@@ -1464,7 +1550,7 @@ try:
     true_width = 3000 # change to alter game size
     screen = pygame.display.set_mode((width, height), pygame.SCALED) # Fix voor Mac computers met HIDPI-scaling
     screen_rect = screen.get_rect()
-    debug = True
+    debug = False
     debug_player = True
     debug_planet = False
     debug_freecam =  False
@@ -1483,6 +1569,7 @@ try:
     bullets = ActiveObjects()
     planets = ActiveObjects()
     enemies = ActiveObjects()
+    particle_effects = ActiveObjects()
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
     enemy_manager = EnemyManager()
     score_manager = ScoreManager()
