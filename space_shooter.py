@@ -21,9 +21,7 @@ class BasicObject():
     def pre_update(self):
         pass # idem, deze methode wordt aangeroepen voor update()
     def kys(self):
-        waste_bin.append(self)
-        
-            
+        waste_bin.append(self)         
 class VisualObject(BasicObject):
 # Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
 
@@ -476,6 +474,9 @@ class Camera(BasicObject):
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
     def player_predict_draw(self):
         # Tekent de voorspelde baan van de speler als witte stippen
+        for prediction in player.position_estimation:
+            pygame.draw.circle(self.pre_screen, 'white', prediction - self.pos + self.offset , 4)
+        '''
         if self.prev_pos == None: self.prev_pos = player.position_estimation
         new_pos_l = []
         for i, pos in enumerate(player.position_estimation):
@@ -484,6 +485,7 @@ class Camera(BasicObject):
             new_pos_l.append(new_pos)
             pygame.draw.circle(self.pre_screen, 'white', new_pos - self.pos + self.offset , 4)
         self.prev_predict = new_pos_l
+        '''
             
     def draw(self, group):
         if not hasattr(group, '__iter__'):
@@ -502,7 +504,7 @@ class Camera(BasicObject):
             center_pos = sprite.pos - self.pos + self.offset
             bg_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, bar_width, bar_height)
             pygame.draw.rect(self.pre_screen, (150, 0, 0), bg_rect)
-            hp_fraction = sprite.hp / sprite.max_hp
+            hp_fraction = sprite.hp / sprite.__class__.max_hp
             hp_rect = pygame.Rect(center_pos.x - bar_width // 2, center_pos.y - 22, int(bar_width * hp_fraction), bar_height)
             pygame.draw.rect(self.pre_screen, (0, 200, 0), hp_rect)
 
@@ -892,7 +894,7 @@ class Planet(PhysicsObject,VisualObject):
 class Player(Spaceship):
     bullet_type = Bullet
     bullet_reload = 15
-    max_hp = 3
+    max_hp = 15
     grav_ticker = 1
     theme_colour = (53, 114, 212)
     speed = 750
@@ -1136,24 +1138,28 @@ class BaseEnemy(Spaceship):
                 return target.pos
             target_dir = target_vect / dist
     
-            relative_vel = (self.vel - target.vel).dot(target_dir)
-            effective_speed = bullet_speed + relative_vel
+            
+            straight_speed = self.vel * target_dir
+            perp_speed_sq = (self.vel - straight_speed * target_dir).magnitude_squared()
+            bullet_speed_sq = bullet_speed ** 2
+            effective_speed =  straight_speed + math.sqrt(bullet_speed_sq - perp_speed_sq) if bullet_speed_sq >= perp_speed_sq else straight_speed 
     
             if effective_speed <= 0:
                 return target.pos
     
             travel_time = dist / effective_speed
-            target_decimal_index = max(0, (travel_time * fps / Spaceship.pos_estim_step_size) - 1)
+            target_decimal_index = travel_time * fps / Spaceship.pos_estim_step_size
             delta = target_decimal_index - math.floor(target_decimal_index)
             floor_index = int(math.floor(target_decimal_index))
             ceil_index = floor_index + 1
-            if floor_index == 0:
-                predict = (1 - delta) * target.pos + delta * target.position_estimation[0]
+            
+            if target_decimal_index < 1.0:
+                # between current pos and first dot
+                predict = (1 - target_decimal_index) * target.pos + target_decimal_index * target.position_estimation[0]
             elif ceil_index > 4:
                 predict = target.position_estimation[4]
             else:
-                predict = ((1 - delta) * target.position_estimation[floor_index ]
-                               + delta * target.position_estimation[ceil_index])
+                predict = (1 - delta) * target.position_estimation[floor_index - 1] + delta * target.position_estimation[floor_index]
     
         self.aim_target = predict
         return predict
@@ -1215,11 +1221,13 @@ class Explosion(CircularHitbox):
             if (not element in self.hit_list) and self.hit(element):
                 self.hit_list.append(element)
                 element.take_damage(self.__class__.damage)
+                element.vel += 1000 * (element.pos - self.pos) / element.mass
         self.duration -= 1
         if self.duration <= 0: self.kys()
 class SimpleEnemy(BaseEnemy):
     theme_colour = (199, 59, 28)
     spawn_weight = 4
+    
 class SniperEnemy(BaseEnemy):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
@@ -1562,11 +1570,13 @@ def main():
             pygame.display.update()
             clock.tick(fps)
             continue
-    
+        
         chunkmanager.update()
         enemy_manager.update()
         active_object.update()
         bullets.update()
+        enemies.resolve_pending_add()
+        planets.resolve_pending_add()
         particle_effects.update()
         
         
