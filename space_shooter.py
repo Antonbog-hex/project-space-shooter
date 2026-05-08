@@ -171,7 +171,7 @@ class RotatingObject(BasicObject):
 
     def update(self):
         new_angle = self.angle + self.angle_moment*timestep
-        if self._is_visual and abs(new_angle- self.angle) > 0.5: self.image = pygame.transform.rotozoom(self.base_image, new_angle, 1)
+        if self._is_visual: self.image = pygame.transform.rotozoom(self.base_image, new_angle, 1)
         self.angle = new_angle
         super().update()
 
@@ -375,7 +375,7 @@ class ActiveObjects(list):
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
     max_width = 5000 # the max width to zoom out to
-    min_width = 1000 # the min width to zoom into
+    min_width = 2000 # the min width to zoom into
     def __init__(self,screen):
         super().__init__()
         
@@ -417,24 +417,29 @@ class Camera(BasicObject):
         
         
         last_pred = target.position_estimation[-1]
-        desired_height = (last_pred - target.pos).magnitude() + 50 
-        desired_height *= 2
-        base_half_h = self.final_screen.get_height() 
+        to_fit_vector = last_pred - target.pos
+        desired_height = abs(to_fit_vector.y) * 2
+        desired_width = abs(to_fit_vector.x)  * 2
+        
+        base_h = self.final_screen.get_height()
+        base_w = self.final_screen.get_width()
           
-        required_zoom =  desired_height/base_half_h if desired_height > 0 else self.base_zoom
+        required_zoom =  desired_height/base_h 
+        required_zoom = max(required_zoom , desired_width/base_w)
         required_zoom = pygame.math.clamp(required_zoom, self.min_zoom, self.max_zoom)
         if abs(required_zoom- self.zoom_level) > 0.01:
             self.zoom_level += (required_zoom - self.zoom_level) * 0.05 # LERP zoom
             self._rebuild_pre_screen()  
     def background_draw(self):
         # Tegelt de achtergrondafbeelding zodat hij oneindig groot lijkt.
-        self.pre_screen.fill((0,0,0))
+        
         bg_w = self.background_surf.get_width()
         bg_h = self.background_surf.get_height()
         
+        parralax = 0.9
         
-        top_left_x = self.pos.x - self.offset.x
-        top_left_y = self.pos.y - self.offset.y
+        top_left_x = self.pos.x * parralax - self.offset.x
+        top_left_y = self.pos.y * parralax - self.offset.y
         
         # offset into the tile based on camera position
         start_x = -int(top_left_x % bg_w)
@@ -463,6 +468,7 @@ class Camera(BasicObject):
                 v = sprite.vel
                 if v.magnitude_squared() != 0: v=v.clamp_magnitude(800)
                 pygame.draw.line(self.pre_screen, 'orange', pos, pos+v)
+            else: continue
             if sprite._is_target:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
             if sprite._is_enemy and debug_enemy:
@@ -591,7 +597,16 @@ class SniperBullet(BaseBullet):
     lifetime = 300
     radius = 5
     texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
-    pygame.draw.circle(texture,(224, 196, 11), (radius, radius), radius)
+    pygame.draw.circle(texture,(212, 178, 53), (radius, radius), radius)
+    mass = 4 
+
+class ShotgunPellet(BaseBullet):
+    damage = 1
+    speed = 400
+    lifetime = 120
+    radius = 4
+    texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
+    pygame.draw.circle(texture,(48, 43, 186), (radius, radius), radius)
     mass = 4 
 class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     pos_estim_step_size = 20# number of frames that get predicted per step
@@ -882,15 +897,16 @@ class Planet(PhysicsObject,VisualObject):
         
         super().update()   
 class Player(Spaceship):
-    bullet_type = SniperBullet
+    bullet_type = Bullet
     bullet_reload = 15
     max_hp = 15
     grav_ticker = 1
     theme_colour = (53, 114, 212)
     speed = 750
+    
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
-        super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle)
+        super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle, hitbox_radius= 20)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image = self.base_image
     def input_check(self):
@@ -912,7 +928,7 @@ class Player(Spaceship):
         self.vel = self.vel.clamp_magnitude(self.__class__.speed)
         self.pos_estimation_update()
         super().update()
-   
+
 class BaseEnemy(Spaceship):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
@@ -969,6 +985,7 @@ class BaseEnemy(Spaceship):
         turn_error = signed_angle_to( self.current_heading, heading)
         if abs(turn_error) < self.__class__.snap_cutoff: 
             self.angle += turn_error 
+            self.angle_moment = 0
         else:
             self.angle_moment += turn_error * self.__class__.to_moment_amplifier - self.angle_moment * self.__class__.moment_dampener  # tune this multiplier         
     def navigate_to_point(self, point: pygame.Vector2, for_frames=1):
@@ -1112,7 +1129,7 @@ class BaseEnemy(Spaceship):
         corrected_dir = target_dir.rotate(sign * lead_angle)
         
         self.turn_to(corrected_dir)
-        return corrected_dir.dot(self.current_heading) > 0.8  
+        return corrected_dir.dot(self.current_heading) > 0.95  
     def get_pos_pred(self, target):
         bullet_speed = self.__class__.bullet_type.speed
     
@@ -1154,7 +1171,7 @@ class BaseEnemy(Spaceship):
             self.accelerate()
         if d_vel * self.current_heading < 0:
             self.decelerate()
-        self.turn_to(target.pos-self.pos)   
+        if d_vel.magnitude_squared() >= self.__class__.max_rel_vel * 2: self.turn_to(target.pos-self.pos)   
     def pre_update(self):
         super().pre_update()
         if self.player_memory > 0:
@@ -1183,14 +1200,16 @@ class BaseEnemy(Spaceship):
                 return
         self.drift()   
     def player_interact(self):
+        if self.bullet_ticker < 10:#self.__class__.pre_aim_ticks:
+            quality = self.aim(self.get_pos_pred(player))
+            if self.bullet_ticker == 0 and quality: self.shoot()
+            return
         if (self.pos - player.pos).magnitude_squared() > self.__class__.approach_dist ** 2: 
             self.navigate_to_point(player.pos)
         elif (self.vel - player.vel).magnitude_squared() > self.__class__.max_rel_vel ** 2:
             self.match_vel(player)
-        else: self.aim(self.get_pos_pred(player))
-        if self.bullet_ticker < self.__class__.pre_aim_ticks:
-            self.aim(self.get_pos_pred(player))
-            if self.bullet_ticker == 0: self.shoot()
+        else: self.turn_to(player.pos-self.pos) #self.aim(self.get_pos_pred(player))
+        
 class Explosion(CircularHitbox):
     damage = 3
     def __init__(self,pos,radius,duration):
@@ -1205,9 +1224,9 @@ class Explosion(CircularHitbox):
                 element.take_damage(self.__class__.damage)
         self.duration -= 1
         if self.duration <= 0: self.kys()
-class BasicBrute(BaseEnemy):
+class SimpleEnemy(BaseEnemy):
     theme_colour = (199, 59, 28)
-    spawn_weight = 5
+    spawn_weight = 4
 class SniperEnemy(BaseEnemy):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
@@ -1241,7 +1260,7 @@ class SniperEnemy(BaseEnemy):
 class SuicideEnemy(BaseEnemy):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
-    spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt - to be implemented
+    spawn_weight = 2      # hoe groter, hoe vaker dit type spawnt - to be implemented
     bullet_type = Bullet
     bullet_reload = 180 # ticks to reload
     image_path = 'graphics/enemies/enemy_4.png' 
@@ -1260,8 +1279,36 @@ class SuicideEnemy(BaseEnemy):
     def detonate(self):
         active_object.add(Explosion(self.pos,duration = 120,radius = self.__class__.explosion_size))
         self.kys()
+class ShotgunEnemy(BaseEnemy):
+    # Dit is een basis vijand, alle andere vijanden erven hiervan
+    # Verander deze waarden in de subklassen om een ander type vijand te maken
+    spawn_weight = 2    # hoe groter, hoe vaker dit type spawnt - to be implemented
+    bullet_type = ShotgunPellet
+    image_path = 'graphics/enemies/enemy_2.png' 
+    max_hp = 4
+
+
+    min_approach_speed = 350
+
+    
+
+    visual_cone_angle = 110 # degrees of visual cone
+
+    approach_dist = 400 # distance beyond which the enemy approaches
+    max_rel_vel = 100 # maximum relative velocity before correcting
+  
+    
+    theme_colour = (48, 43, 186)
+    def shoot(self):
+        if self.bullet_ticker > 0 : return
+        for i in range(8):
+            aim = self.current_heading.rotate(random.uniform(-10, 10))
+            bullet = self.__class__.bullet_type(self.pos,self.vel + aim * self.__class__.bullet_type.speed * random.uniform(0.5,1),self)
+            bullets.add(bullet)      
+            self.bullet_ticker = self.__class__.bullet_reload      
 # Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
-all_enemy_types = [ BasicBrute, SniperEnemy,SuicideEnemy]
+all_enemy_types = [ SimpleEnemy, SniperEnemy,SuicideEnemy,ShotgunEnemy]
+
 
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
@@ -1318,6 +1365,22 @@ def signed_angle_to(v1, v2):
     cross = -(v1.x * v2.y - v1.y * v2.x) # negation to fix weirdness with pygames inverted y
     dot = v1.dot(v2)
     return math.degrees(math.atan2(cross, dot))
+def reset_game():
+    global player, active_object, bullets, planets, enemies, chunkmanager, enemy_manager
+    active_object.clear()
+    bullets.clear()
+    planets.clear()
+    enemies.clear()
+    particle_effects.clear()
+    chunkmanager  = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
+    enemy_manager = EnemyManager()
+    player        = Player(pos=(0, 0), vel=(0, 200), angle=0)
+    score_manager.reset()
+    active_object.add(player)
+    active_object.add(debug_mass)
+    camera.pos = pygame.Vector2(0, 0)
+    camera.zoom(1.0)
+    camera.prev_pos = None
 #%% Prefabs
 
 
@@ -1445,20 +1508,7 @@ all_prefabs = {
     'satellite':  prefab_satellite_network
 }
 
-def reset_game():
-    global player, active_object, bullets, planets, enemies, chunkmanager, enemy_manager
-    active_object = ActiveObjects()
-    bullets       = ActiveObjects()
-    planets       = ActiveObjects()
-    enemies       = ActiveObjects()
-    chunkmanager  = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
-    enemy_manager = EnemyManager()
-    player        = Player(pos=(0, 0), vel=(0, 200), angle=0)
-    score_manager.reset()
-    active_object.add(player)
-    active_object.add(debug_mass)
-    camera.pos = pygame.Vector2(0, 0)
-    camera.zoom(1.0)
+
 #%% Main function
 
 def main():
@@ -1488,7 +1538,7 @@ def main():
                         menu.active = False
                         reset_game()
                         # debug
-                        debug_enemy_obj = SuicideEnemy(pos=(400, 0), vel=(0, 100), angle=180)
+                        debug_enemy_obj = SimpleEnemy(pos=(400, 0), vel=(0, 100), angle=180)
                         active_object.add(debug_enemy_obj)
                         enemies.add(debug_enemy_obj)
                     else:
