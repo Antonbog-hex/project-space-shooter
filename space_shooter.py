@@ -21,23 +21,8 @@ class BasicObject():
     def pre_update(self):
         pass # idem, deze methode wordt aangeroepen voor update()
     def kys(self):
+        waste_bin.append(self)
         
-        try:
-            active_object.remove(self)
-        except:
-            pass
-        try:
-            bullets.remove(self)
-        except:
-            pass
-        try:
-            planets.remove(self)
-        except:
-            pass
-        try:
-            enemies.remove(self)
-        except:
-            pass
             
 class VisualObject(BasicObject):
 # Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
@@ -310,8 +295,7 @@ class ParticleEffect(VisualObject):
         self.update_image()
         self.ticker -= 1
         if self.ticker <= 0: self.kys()
-    def kys(self):
-        particle_effects.remove(self)
+    
 class ExplosionEffect(ParticleEffect):
     
     
@@ -363,15 +347,22 @@ class ActiveObjects(list):
 
     def __init__(self):
         super().__init__()
-
+        self._pending_add = []
+    def resolve_pending_add(self):
+        for obj in self._pending_add:
+            self.append(obj)
+        self._pending_add.clear()
     def add(self,other:PhysicsObject):
-        self.append(other)
-
+        self._pending_add.append(other)
+    def reset(self):
+        self._pending_add.clear()
+        self.clear()
     def update(self):
         for e in self:
             e.pre_update() # calculates without action (eg. gravity)
         for e in self:
             e.update() # the action (eg. movement)
+        self.resolve_pending_add()
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
     max_width = 5000 # the max width to zoom out to
@@ -661,6 +652,7 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
             if not sprite._is_physics: continue
             if self.hit(sprite): # you cannot use id here because planets never check for collisions with spaceships
                 if sprite._is_planet:
+                    if sprite.style == 'black_hole': self.take_damage(self.hp)
                     self.elastic_collision(sprite,energy_dis= 1.1, damage_multiplier= 1)
                 if sprite._is_spaceship:
                     self.elastic_collision(sprite, energy_dis = 1.4, damage_multiplier= 1)
@@ -849,6 +841,7 @@ class Menu:
 class Planet(PhysicsObject,VisualObject):
     # Een planeet: heeft een afbeelding, massa (gebaseerd op dichtheid+grootte) en botst elastisch met andere planeten.
     def __init__(self, pos, vel, style,density, size = 1):
+        self.style = style
         image = Planet.get_image(style,size)
         mass = 2500*density * size ** 2
         super().__init__(pos = pos ,image = image,vel=vel,mass = mass,hitbox_radius=size*255)
@@ -899,7 +892,7 @@ class Planet(PhysicsObject,VisualObject):
 class Player(Spaceship):
     bullet_type = Bullet
     bullet_reload = 15
-    max_hp = 15
+    max_hp = 3
     grav_ticker = 1
     theme_colour = (53, 114, 212)
     speed = 750
@@ -1365,13 +1358,26 @@ def signed_angle_to(v1, v2):
     cross = -(v1.x * v2.y - v1.y * v2.x) # negation to fix weirdness with pygames inverted y
     dot = v1.dot(v2)
     return math.degrees(math.atan2(cross, dot))
+def empty_bin(waste_bin):
+    for obj in waste_bin:
+        try: active_object.remove(obj)
+        except: pass
+        try: bullets.remove(obj)
+        except:pass
+        try: planets.remove(obj)
+        except: pass
+        try: enemies.remove(obj)
+        except:pass
+        try: particle_effects.remove(obj)
+        except: pass
+    waste_bin.clear()
 def reset_game():
     global player, active_object, bullets, planets, enemies, chunkmanager, enemy_manager
     active_object.clear()
-    bullets.clear()
-    planets.clear()
-    enemies.clear()
-    particle_effects.clear()
+    bullets.reset()
+    planets.reset()
+    enemies.reset()
+    particle_effects.reset()
     chunkmanager  = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
     enemy_manager = EnemyManager()
     player        = Player(pos=(0, 0), vel=(0, 200), angle=0)
@@ -1562,7 +1568,8 @@ def main():
         active_object.update()
         bullets.update()
         particle_effects.update()
-    
+        
+        
         if debug_freecam:
             camera.freecam()
             player.pos = camera.pos
@@ -1582,6 +1589,7 @@ def main():
         camera.draw_player_hp(player)
         if not menu.active:
             camera.draw_player_hp(player)
+        empty_bin(waste_bin)
         pygame.display.update()
         clock.tick(fps)
         
@@ -1620,6 +1628,7 @@ try:
     planets = ActiveObjects()
     enemies = ActiveObjects()
     particle_effects = ActiveObjects()
+    waste_bin = [] # list to keep elements that will be removed in a later stage
     chunkmanager = ChunkManager(around_chunks=1, chunk_size  = (5000,5000))
     enemy_manager = EnemyManager()
     score_manager = ScoreManager()
