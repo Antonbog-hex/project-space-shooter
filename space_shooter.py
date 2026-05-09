@@ -24,17 +24,69 @@ class BasicObject():
         waste_bin.append(self)         
 class VisualObject(BasicObject):
 # Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
-
+    heal_animation_length = 60
     def __init__(self, image: pygame.Surface, **kwargs):
             if isinstance(image, str):
                 image = pygame.image.load(image).convert_alpha()
             super().__init__(**kwargs)
             self.image = image
             self.base_image = self.image  # bewaar origineel voor rotaties
-
+            self.animation_state = None
+            self.animation_ticker = 0
+            self.ticker_start = 0
     def get_frame_pos(self) -> pygame.Vector2:
         offset = pygame.math.Vector2(self.image.get_width() // 2, self.image.get_height() // 2)
         return self.pos - offset
+    def animate(self):
+        if self.animation_state == 'healing':
+            progress = (self.ticker_start - self.animation_ticker)/self.ticker_start
+            self.image = self.pulse_animation_frame(self.image, progress, (99, 245, 66))
+            return
+        if self.animation_state == 'charge_up':
+            progress = self.animation_ticker/self.__class__.heal_animation_length
+            self.image = self.pulse_animation_frame(self.image, progress , self.__class__.theme_colour)
+    def heal_animation(self):
+        self.animation_ticker = self.__class__.heal_animation_length
+        self.ticker_start = self.animation_ticker
+        self.animation_state = 'healing'
+    def charge_up_animation(self,length):
+        self.animation_ticker = length
+        self.ticker_start = self.animation_ticker
+        self.animation_state = 'charge_up'
+    def update(self):
+        if self.animation_ticker > 0:
+            self.animate()
+            self.animation_ticker -= 1
+        super().update()
+    def pulse_animation_frame(self, base_image, progress, colour):
+            w, h = base_image.get_size()
+            cx, cy = w // 2, h // 2
+            
+            # Radii and Alpha based on 0.0 -> 1.0 progress
+            outer_radius = int(progress * max(w, h))
+            inner_radius = max(0, outer_radius - 10)
+            alpha = int(255 * (1 - progress))
+            
+            if outer_radius <= 0:
+                return base_image.copy()
+    
+            # Create a temp surface for the ring
+            donut = pygame.Surface((w, h), pygame.SRCALPHA)
+            pygame.draw.circle(donut, (255,255,255, alpha/ 2), (cx, cy), outer_radius)
+            pygame.draw.circle(donut, (*colour, alpha), (cx, cy), outer_radius)
+            if inner_radius > 0:
+                # Cut the center out
+                pygame.draw.circle(donut, (0, 0, 0, 0), (cx, cy), inner_radius)
+            
+            # MASKING: Only show the donut where the base_image is visible
+            # We blit the base_image onto the donut using BLEND_RGBA_MULT
+            mask = base_image.copy()
+            donut.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            
+            # Combine with original
+            result = base_image.copy()
+            result.blit(donut, (0, 0),special_flags=pygame.BLEND_RGB_ADD)
+            return result
 
 class MovingObject(BasicObject):
     """
@@ -460,6 +512,7 @@ class Camera(BasicObject):
             else: continue
             if debug_bullets and isinstance(sprite,BaseBullet):
                 pygame.draw.circle(self.pre_screen, 'red', pos, sprite.hitbox_radius,width = 1)
+                if isinstance(sprite,RocketBullet): pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 100)
             if sprite._is_target:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
             if sprite._is_enemy and debug_enemy:
@@ -570,10 +623,8 @@ class BaseBullet(PhysicsObject, VisualObject):
                     obj.kys()
                     self.kys()
                 elif obj._is_enemy:
-                    old_hp = obj.hp
                     obj.take_damage(self.__class__.damage)
-                    if old_hp > 0 and obj.hp <= 0:
-                        score_manager.add_score(100)
+                    if self.source == player: obj.hit_by_player = True
                     self.kys()
                 elif obj._is_player:
                     obj.take_damage(self.__class__.damage)
@@ -627,6 +678,10 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
                 menu.is_death_screen = True
             active_object.add(Explosion(self.pos, self.hitbox_radius * 0.8, 60))
             self.kys()
+    def heal(self,amount = 1):
+        self.hp += amount
+        self.hp = min(self.hp,self.__class__.max_hp)
+        self.heal_animation()
     def shoot(self):
         if self.bullet_ticker > 0 : return
         bullet = self.__class__.bullet_type(self.pos,self.vel + self.current_heading * self.__class__.bullet_type.speed,self)
@@ -680,6 +735,7 @@ class BaseEnemy(Spaceship):
     # check_visual (player finding)
     max_player_dist = 2500 # distance at which player if fully forgotten
     visual_cone_angle = 100 # degrees of visual cone
+    player_max_memory = 900 # how many ticks the player is remembered for
     # get_pos_predict
     pred_iterations = 3
     # general movement
@@ -701,6 +757,7 @@ class BaseEnemy(Spaceship):
         self.longer_target = None # for long duration navigate_to
         self.player_memory = 0 # ticker for remembering player 0 = forgotten
         self.desired_heading = None # this is for debug draw
+        self.hit_by_player = False #  has it ever been hit by the player
         if debug_enemy:
             self.status= '' # string that states what enemies does this tick
             self.prev_satus = '' # string that states what enemies does prev tick 
@@ -905,7 +962,7 @@ class BaseEnemy(Spaceship):
         if self.player_memory > 0:
             self.player_memory -= 1
         if self.check_visual():
-            self.player_memory = 300
+            self.player_memory = self.__class__.player_max_memory
         self.general_movement()
         if debug_enemy:
             if self.status != self.prev_satus:
@@ -928,7 +985,7 @@ class BaseEnemy(Spaceship):
                 return
         self.drift()   
     def player_interact(self):
-        if self.bullet_ticker < 10:#self.__class__.pre_aim_ticks:
+        if self.bullet_ticker < self.__class__.pre_aim_ticks:
             quality = self.aim(self.get_pos_pred(player))
             if self.bullet_ticker == 0 and quality: self.shoot()
             return
@@ -937,6 +994,9 @@ class BaseEnemy(Spaceship):
         elif (self.vel - player.vel).magnitude_squared() > self.__class__.max_rel_vel ** 2:
             self.match_vel(player)
         else: self.turn_to(player.pos-self.pos) #self.aim(self.get_pos_pred(player))
+    def kys(self):
+        if self.hit_by_player: score_manager.add_score(self.__class__.score)
+        super().kys()
 class SniperBullet(BaseBullet):
     damage = 3
     speed = 2800
@@ -954,8 +1014,10 @@ class RocketBullet(BaseBullet,RotatingObject):
     explosion_duration = 45
     mass = 25
     snap_cutoff = 0.5
-    to_moment_amplifier = 0.2
+    to_moment_amplifier = 0.1
     moment_dampener = 0.01
+    perp_correction_cutoff = 50
+    min_approach_speed = 300
     def __init__(self,pos,vel,source):
         self.current_heading = source.current_heading
         angle = - self.current_heading.as_polar()[1]
@@ -966,18 +1028,20 @@ class RocketBullet(BaseBullet,RotatingObject):
         self.enemy_bullet = self.source._is_enemy
         if not self.enemy_bullet:
             self.target = min(enemies, key = lambda enemy: (enemy.pos - self.pos).magnitude_squared())
-        
+        else: self.target = player
+    def turn_to(self,heading):
+        BaseEnemy.turn_to(self, heading)
+    def accelerate(self):
+        self.acc += self.current_heading *  300
+    def decelerate(self):
+        pass
     def kys(self):
         active_object.add(Explosion(self.pos, self.__class__.radius * 3, self.__class__.explosion_duration))
         super().kys()
     def update(self):
-        if self.enemy_bullet:
-            target_dir = player.pos - self.pos
-        else:
-            target_dir = self.target.pos - self.pos
-        BaseEnemy.turn_to(self, target_dir)
+        
         Spaceship._orientation_update(self)
-        self.acc += self.current_heading * (self.__class__.lifetime - self.lifetime_ticker)
+        BaseEnemy.navigate_to_point(self, self.target.pos)
         particle_effects.add(TrailParticle(self.pos,radius = 4,color = (235, 125, 52)))
         super().update()
 class ShotgunPellet(BaseBullet):
@@ -1097,13 +1161,13 @@ class EnemyManager:
     def update(self):
         if len(enemies) >= self.__class__.max_enemies: return
         if self.spawn_ticker <= 0:
-            try:
-                self.spawn_seq(player.pos)
-            except: 
-                print(player.pos)
+            self.spawn_seq(player.pos)
             self.spawn_ticker = self.__class__.spawn_ticks
         else:
             self.spawn_ticker -= self.difficulty_score
+        if random.randint(0,7200) < self.difficulty_score:
+            for enemy in enemies:
+                enemy.player_memory = enemy.__class__.player_max_memory
 class ScoreManager:
     def __init__(self):
         self.score = 0
@@ -1115,6 +1179,7 @@ class ScoreManager:
         self.score += amount
         if self.score > self.high_score:
             self.high_score = self.score
+        enemy_manager.difficulty_score = self.score // 100 + 1
 
     def reset(self):
         self.score = 0
@@ -1217,12 +1282,13 @@ class Player(Spaceship):
     grav_ticker = 1
     theme_colour = (53, 114, 212)
     speed = 750
-    
+    auto_score_ticks = 30
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
         super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle, hitbox_radius= 20)
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image = self.base_image
+        self.auto_score_ticker = self.__class__.auto_score_ticks
     def input_check(self):
         # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
         keys = pygame.key.get_pressed()
@@ -1236,11 +1302,20 @@ class Player(Spaceship):
             self.angle_moment += -20
         if keys[pygame.K_SPACE]:
             self.shoot()
+        if keys[pygame.K_r]:
+            self.charge_up_animation(30)
+        if keys[pygame.K_t]:
+            self.heal_animation()
     
     def update(self):
         if not debug_freecam: self.input_check()
         self.vel = self.vel.clamp_magnitude(self.__class__.speed)
         self.pos_estimation_update()
+        if self.auto_score_ticker <= 0:
+            score_manager.add_score(1)
+            self.auto_score_ticker = self.__class__.auto_score_ticks
+        else:
+            self.auto_score_ticker -= 1
         super().update()
 
 
@@ -1263,8 +1338,9 @@ class Explosion(CircularHitbox):
 class SimpleEnemy(BaseEnemy):
     theme_colour = (199, 59, 28)
     spawn_weight = 4
-    
+    score = 30
 class SniperEnemy(BaseEnemy):
+    score  = 50
     spawn_weight = 3      # hoe groter, hoe vaker dit type spawnt
     bullet_reload = 300 # ticks to reload
     image_path = 'graphics/enemies/enemy_3.png' 
@@ -1292,6 +1368,7 @@ class SniperEnemy(BaseEnemy):
             self.back_up(player)
         super().player_interact()
 class SuicideEnemy(BaseEnemy):
+    score  = 60
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
     spawn_weight = 2      # hoe groter, hoe vaker dit type spawnt - to be implemented
@@ -1313,14 +1390,13 @@ class SuicideEnemy(BaseEnemy):
         active_object.add(Explosion(self.pos,duration = 120,radius = self.__class__.explosion_size))
         self.kys()
 class ShotgunEnemy(BaseEnemy):
+    score = 80
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
     spawn_weight = 2    # hoe groter, hoe vaker dit type spawnt - to be implemented
     bullet_type = ShotgunPellet
     image_path = 'graphics/enemies/enemy_2.png' 
     max_hp = 4
-
-
     min_approach_speed = 350
 
     
@@ -1339,8 +1415,8 @@ class ShotgunEnemy(BaseEnemy):
             bullet = self.__class__.bullet_type(self.pos,self.vel + aim * self.__class__.bullet_type.speed * random.uniform(0.5,1),self)
             bullets.add(bullet)      
             self.bullet_ticker = self.__class__.bullet_reload      
-
 class RocketEnemy(BaseEnemy):
+    score = 140
     spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt
     bullet_reload = 300 # ticks to reload
     image_path = 'graphics/enemies/7.png' 
@@ -1357,8 +1433,62 @@ class RocketEnemy(BaseEnemy):
     speed = 350
     bullet_type = RocketBullet
     theme_colour = (196, 90, 20)
+class HealingEnemy(BaseEnemy):
+    spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt - to be implemented
+    score  = 100
+    image_path = 'graphics/enemies/6.png' 
+    hitbox_radius = 25
+    max_hp = 3
+
+    # avoid collision
+    time_in_advance = 3 # number of seconds in advance checked for collision
+    #swerve
+    swerve_ticker_length = 75 # ticks the ship keeps flying away
+    # check_visual (player finding)
+    max_player_dist = 3000 # distance at which player if fully forgotten
+    visual_cone_angle = 100 # degrees of visual cone
+    player_max_memory = 2000 # how many ticks the player is remembered for
+    
+    charge_up_length = 600
+    heal_radius = 500
+    theme_colour = (40, 184, 107)
+    def __init__(self,pos,vel=0,angle=0,**kwargs):
+        super().__init__(pos = pos, vel = vel, angle= angle, **kwargs)
+        self.closest_ally = None
+        self.enemy_mem_ticker = 0
+        self.charge = 0
+        self.last_animated_charge = 0
+    def find_ally(self):
+        enemies_local = enemies.copy()
+        enemies_local.remove(self)
+        if len(enemies) == 0: 
+            ally = None
+        else:
+            ally = min(enemies_local,key= lambda enemy: (enemy.pos - self.pos).magnitude_squared())
+        self.closest_ally = ally
+        self.enemy_mem_ticker = 600
+    def charge_up(self):
+        self.charge += 1
+        if self.charge > self.last_animated_charge:
+            length = min(max(int((self.__class__.charge_up_length-self.charge )*0.25),15), 60)
+            self.charge_up_animation(length)
+            self.last_animated_charge += length
+        
+    def player_interact(self):
+        if self.enemy_mem_ticker <= 0: self.find_ally() 
+        if self.closest_ally != None: self.navigate_to_point(self.closest_ally.pos)
+    def update(self):
+        if self.charge >= self.__class__.charge_up_length:
+            self.charge = 0
+            self.last_animated_charge = 0
+            for enemy in enemies:
+                if (enemy.pos - self.pos).magnitude_squared() < self.__class__.heal_radius ** 2 :
+                    enemy.heal()
+        elif self.player_memory > 0:
+            self.charge_up()
+        super().update()
 # Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
-all_enemy_types = [ SimpleEnemy, SniperEnemy,SuicideEnemy,ShotgunEnemy,RocketEnemy] 
+all_enemy_types = [ SimpleEnemy, SniperEnemy,SuicideEnemy,ShotgunEnemy,RocketEnemy,HealingEnemy] 
 
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
@@ -1601,7 +1731,10 @@ def main():
                         menu.active = False
                         reset_game()
                         # debug
-                        debug_enemy_obj = SimpleEnemy(pos=(400, 0), vel=(0, 100), angle=180)
+                        debug_enemy_obj = HealingEnemy(pos=(400, 0), vel=(0, 100), angle=180)
+                        active_object.add(debug_enemy_obj)
+                        enemies.add(debug_enemy_obj)
+                        debug_enemy_obj = SniperEnemy(pos=(450, 0), vel=(0, 100), angle=180)
                         active_object.add(debug_enemy_obj)
                         enemies.add(debug_enemy_obj)
                     else:
@@ -1676,7 +1809,7 @@ try:
     debug_world_gen = False
     debug_enemy = False
     debug_disable_enemy_spawn = False
-    debug_bullets = True
+    debug_bullets = False
     player = Player(pos=(0,0),vel=(0,200),angle= 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
