@@ -24,7 +24,7 @@ class BasicObject():
         waste_bin.append(self)         
 class VisualObject(BasicObject):
 # Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
-    heal_animation_length = 60
+    heal_animation_length = 80
     def __init__(self, image: pygame.Surface, **kwargs):
             if isinstance(image, str):
                 image = pygame.image.load(image).convert_alpha()
@@ -45,6 +45,11 @@ class VisualObject(BasicObject):
         if self.animation_state == 'charge_up':
             progress = self.animation_ticker/self.__class__.heal_animation_length
             self.image = self.pulse_animation_frame(self.image, progress , self.__class__.theme_colour)
+            return
+        if self.animation_state == 'shield':
+            progress = (self.ticker_start - self.animation_ticker)/self.ticker_start
+            self.image = self.pulse_animation_frame(self.image, progress, (40, 79, 235))
+            return
     def heal_animation(self):
         self.animation_ticker = self.__class__.heal_animation_length
         self.ticker_start = self.animation_ticker
@@ -53,6 +58,10 @@ class VisualObject(BasicObject):
         self.animation_ticker = length
         self.ticker_start = self.animation_ticker
         self.animation_state = 'charge_up'
+    def shield_animation(self,length):
+        self.animation_ticker = length
+        self.ticker_start = self.animation_ticker
+        self.animation_state = 'shield'
     def update(self):
         if self.animation_ticker > 0:
             self.animate()
@@ -572,7 +581,9 @@ class Camera(BasicObject):
         y = self.final_screen.get_height() - 35
         pygame.draw.rect(self.final_screen, (100, 0, 0), (x, y, bar_w, bar_h), border_radius=4)
         fraction = max(0, player.hp / player.max_hp)
-        pygame.draw.rect(self.final_screen, (0, 180, 0), (x, y, int(bar_w * fraction), bar_h), border_radius=4)
+        pygame.draw.rect(self.final_screen, (0, 180, 0), (x, y, int(bar_w * fraction), bar_h), border_radius=4) # health
+        fraction = max(0, player.shield / player.max_hp)
+        pygame.draw.rect(self.final_screen, (40, 183, 235), (x, y, int(bar_w * fraction), bar_h), border_radius=4) # shield
         pygame.draw.rect(self.final_screen, (255, 255, 255),(x, y, bar_w, bar_h), width=1, border_radius=4)
         
     def finalise(self):
@@ -644,12 +655,15 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     bullet_reload = 30
     theme_colour = None
     standard_mass = 100
+    max_shield = 0
     # Een ruimteschip: combineert physics, rotatie en een afbeelding. Berekent ook een voorspelde baan.
     def __init__(self, pos, vel, angle,image,hitbox_radius = None ,**kwargs):
         hitbox_radius = hitbox_radius or 15
         super().__init__(pos = pos,image = image ,vel = vel , mass = self.__class__.standard_mass, angle = angle , hitbox_radius= hitbox_radius, **kwargs)
         self.position_estimation = [self.pos for i in range(5)]
         self.hp = self.__class__.max_hp
+        self.shield = self.__class__.max_shield
+        self.shield_regen_ticker = 0
         self.bullet_ticker = self.__class__.bullet_reload
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle)) # direction of pointing normvector
     def accelerate(self):
@@ -671,6 +685,13 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         
         active_object.add(self)
     def take_damage(self, amount=1):
+        self.shield_regen_ticker = 750
+        if self.shield > 0:
+            self.shield -= amount
+            amount = 0
+            if self.shield < 0:
+                amount = self.shield
+                self.shield = 0
         self.hp -= amount
         if self.hp <= 0:
             if self._is_player:
@@ -697,11 +718,19 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
                     self.elastic_collision(sprite,energy_dis= 1.1, damage_multiplier= 1)
                 if sprite._is_spaceship:
                     self.elastic_collision(sprite, energy_dis = 1.4, damage_multiplier= 1)
-   
+    def shield_regen(self):
+        if self.shield >= min(self.__class__.max_shield, self.hp): 
+            return
+        else:
+            self.shield += 1
+            self.shield_regen_ticker = 30
+            self.shield_animation(30)
     def _orientation_update(self):
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
     def update(self):
         if self.bullet_ticker > 0 : self.bullet_ticker -= 1
+        if self.shield_regen_ticker > 0 : self.shield_regen_ticker -= 1
+        else: self.shield_regen()
         self.angle_dampen()
         self.resolve_collisions()
         super().update()
@@ -1276,11 +1305,12 @@ class Planet(PhysicsObject,VisualObject):
         
         super().update()   
 class Player(Spaceship):
-    max_hp = 15
+    max_hp = 12
     grav_ticker = 1
     theme_colour = (53, 114, 212)
     speed = 750
     auto_score_ticks = 30
+    max_shield = 5
     # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
     def __init__(self, pos, vel, angle):
         super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle, hitbox_radius= 20)
@@ -1314,10 +1344,6 @@ class Player(Spaceship):
             self.angle_moment += -20
         if keys[pygame.K_SPACE]:
             self.shoot()
-        if keys[pygame.K_r]:
-            self.charge_up_animation(30)
-        if keys[pygame.K_t]:
-            self.heal_animation()
     def shoot(self):
         if self.bullet_ticker > 0 : return
         if self.current_gun == 'Shotgun':
@@ -1825,34 +1851,18 @@ def main():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 raise SystemExit
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                if menu.active:
-                    pygame.quit()
-                    raise SystemExit
-                else:
-                    menu.active = True
-                    menu.is_death_screen = False
-    
             if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    if menu.active:
+                        pygame.quit()
+                        raise SystemExit
+                    else:
+                        menu.active = True
+                        menu.is_death_screen = False
                 if event.key == pygame.K_RETURN:
                     if menu.active:
                         menu.active = False
                         reset_game()
-                        # debug
-                        debug_enemy_obj = HealingEnemy(pos=(400, 0), vel=(0, 100), angle=180)
-                        active_object.add(debug_enemy_obj)
-                        enemies.add(debug_enemy_obj)
-                        active_object.add(ShotgunItem((200 ,- 400)))
-                        active_object.add(RocketGunItem((200, - 200)))
-                        active_object.add(SniperGunItem((200, 0)))
-                        active_object.add(BasicGunItem((200, 200)))
-                        active_object.add(HealItem((200,400)))
-                    else:
-                        simpel_planet_spawn(player.pos, vel=(0, 0))
-                if event.key == pygame.K_p and not menu.active:
-                    active_object.add(Explosion(camera.pos,duration = 120, radius = 50))
-                if event.key == pygame.K_o and not menu.active:
-                    simpel_planet_spawn(camera.pos, vel=(0, 0))
 
     
         if menu.active:
