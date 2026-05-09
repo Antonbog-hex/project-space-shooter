@@ -458,6 +458,8 @@ class Camera(BasicObject):
                 if v.magnitude_squared() != 0: v=v.clamp_magnitude(800)
                 pygame.draw.line(self.pre_screen, 'orange', pos, pos+v)
             else: continue
+            if debug_bullets and isinstance(sprite,BaseBullet):
+                pygame.draw.circle(self.pre_screen, 'red', pos, sprite.hitbox_radius,width = 1)
             if sprite._is_target:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
             if sprite._is_enemy and debug_enemy:
@@ -474,6 +476,7 @@ class Camera(BasicObject):
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
     def player_predict_draw(self):
         # Tekent de voorspelde baan van de speler als witte stippen
+        '''
         for prediction in player.position_estimation:
             pygame.draw.circle(self.pre_screen, 'white', prediction - self.pos + self.offset , 4)
         '''
@@ -485,7 +488,7 @@ class Camera(BasicObject):
             new_pos_l.append(new_pos)
             pygame.draw.circle(self.pre_screen, 'white', new_pos - self.pos + self.offset , 4)
         self.prev_predict = new_pos_l
-        '''
+        
             
     def draw(self, group):
         if not hasattr(group, '__iter__'):
@@ -553,10 +556,10 @@ class BaseBullet(PhysicsObject, VisualObject):
     texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
     pygame.draw.circle(texture,(214, 37, 28), (radius, radius), radius)
     mass = 8
-    def __init__(self, pos, vel, source):
-        super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=self.__class__.radius,image=self.__class__.texture)
+    def __init__(self, pos, vel, source, **kwargs):
+        super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=self.__class__.radius,image=self.__class__.texture,**kwargs)
         self.source = source
-        self.lifetime = self.__class__.lifetime   # frames it lives
+        self.lifetime_ticker = self.__class__.lifetime   # frames it lives
     def check_collisions(self):
         for obj in active_object:
             if obj != self.source and self.hit(obj):
@@ -576,35 +579,16 @@ class BaseBullet(PhysicsObject, VisualObject):
                     obj.take_damage(self.__class__.damage)
                     self.kys()
     def update(self):
-        self.lifetime -= 1
-        if self.lifetime <= 0:
+        self.lifetime_ticker -= 1
+        if self.lifetime_ticker <= 0:
             self.kys()
         self.check_collisions()
         super().update()
-class Bullet(BaseBullet):
-    #legacy to be fased out
-    pass   
-class SniperBullet(BaseBullet):
-    damage = 3
-    speed = 2800
-    lifetime = 300
-    radius = 5
-    texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
-    pygame.draw.circle(texture,(212, 178, 53), (radius, radius), radius)
-    mass = 4 
 
-class ShotgunPellet(BaseBullet):
-    damage = 1
-    speed = 400
-    lifetime = 120
-    radius = 4
-    texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
-    pygame.draw.circle(texture,(48, 43, 186), (radius, radius), radius)
-    mass = 4 
 class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     pos_estim_step_size = 20# number of frames that get predicted per step
     max_hp = 1
-    bullet_type = Bullet
+    bullet_type = BaseBullet
     speed =  500
     bullet_reload = 30
     theme_colour = None
@@ -669,266 +653,11 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
     def pre_update(self):
         self._orientation_update()
         super().pre_update()
-
-class ChunkManager:
-    def __init__(self,chunk_size = (2000,2000),around_chunks = 1):
-        self.chunk_size = chunk_size
-        self.chunk_x = self.chunk_size[0]
-        self.chunk_y = self.chunk_size[1]
-        self.around_chunks = around_chunks
-        self.central_chunk = (0,0)
-        self.all_chunks = {}
-        self.active_chunks = set()
-        self.min_x = 0
-        self.max_x = 0
-        self.min_y = 0
-        self.max_y = 0
-    
-    def get_chunk(self,pos:pygame.Vector2):
-        return (int(pos.x // self.chunk_x ), int(pos.y //self.chunk_y))
-    def set_active(self,chunk):
-        self.active_chunks.add(chunk)
-        try:
-            for element in self.all_chunks[chunk]:
-                active_object.add(element)
-                if element._is_planet: planets.add(element)
-        except:
-            if not debug_disable_world_gen:
-                self.generate_chunk(chunk)
-            self.all_chunks[chunk] = []
-        
-    def set_inactive(self,chunk):
-        self.active_chunks.remove(chunk)
-    def active_chunk_update(self):
-        new_active_chunk = set()
-        for i in range(self.central_chunk[0]-self.around_chunks,self.central_chunk[0]+self.around_chunks+1):
-            for j in range(self.central_chunk[1]-self.around_chunks,self.central_chunk[1]+self.around_chunks+1):
-                chunk = (i,j)
-                new_active_chunk.add(chunk)
-        for chunk in new_active_chunk.difference(self.active_chunks):
-            self.set_active(chunk)
-        for chunk in self.active_chunks.difference(new_active_chunk):
-            self.set_inactive(chunk)
-        self.active_chunks = new_active_chunk
-    def calculate_safezone(self):
-        self.min_x = (self.central_chunk[0] - self.around_chunks) * self.chunk_size[0]
-        self.max_x = (self.central_chunk[0] + self.around_chunks+1) * self.chunk_size[0]
-        self.min_y = (self.central_chunk[1] - self.around_chunks) * self.chunk_size[1]
-        self.max_y = (self.central_chunk[1] + self.around_chunks+1) * self.chunk_size[1]
-    def in_safezone(self,pos:pygame.Vector2):
-        if pos.x < self.max_x and pos.x > self.min_x and pos.y < self.max_y and pos.y > self.min_y:
-            return True
-        return False
-    def get_center(self,chunk): 
-        return pygame.Vector2((chunk[0] + 0.5 )*self.chunk_x,(chunk[1] + 0.5 )*self.chunk_y)
-    def generate_chunk(self, chunk):
-        chunk_center = self.get_center(chunk)
-        random_pos = 500
-        chunk_center += pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
-        prefab = random.choice(list(all_prefabs.values()))
-        self.all_chunks[chunk] = prefab(chunk_center)
-        
-        delta = pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
-        enemy_manager.spawn_seq(chunk_center+delta)
-            
-    def update(self):
-        self.central_chunk = self.get_chunk(player.pos)
-        self.active_chunk_update()
-        self.calculate_safezone()
-
-class EnemyManager:
-    min_spawn_dist = 3000
-    max_spawn_dist = 8000
-    max_enemies = 30
-    spawn_ticks = 300 # number of ticks between enemy spawns at difficulty 1
-    def __init__(self):
-        self.all_enemies = all_enemy_types
-        self.weights = [t.spawn_weight for t in self.all_enemies]
-        self.spawn_ticker = self.__class__.spawn_ticks
-        self.difficulty_score = 1 # larger = more difficult
-    def spawn_enemy(self,enemy_type,pos):
-        if debug_disable_enemy_spawn: return
-        enemy = enemy_type(pos)
-        active_object.add(enemy)
-        enemies.add(enemy)
-    def get_enemy_type(self):
-        return random.choices(self.all_enemies, weights=self.weights, k=1)[0]
-    def find_spot(self,pos:pygame.Vector2, min_dist = None, max_dist =None):
-        max_dist = max_dist or self.__class__.max_spawn_dist
-        min_dist = min_dist or self.__class__.min_spawn_dist
-        dist = random.uniform(min_dist,max_dist)
-        angle = random.uniform(0,360)
-        delta = pygame.Vector2.from_polar((dist,angle))
-        pos = pygame.Vector2(pos) + delta
-        tester = Predictor(pos, mass = Spaceship.standard_mass)
-        for i in range(5):
-            tester.pre_update()
-            f = tester.force
-            if f.magnitude_squared() < 2000 ** 2 and (pos-player.pos).magnitude_squared() > self.__class__.min_spawn_dist ** 2:
-                return pos
-            f += pygame.Vector2(0.1,0.1)
-            tester.pos -= 10* f / (f*f) ** 0.25
-        return None
-    def spawn_seq(self,start_pos):
-        if debug_disable_enemy_spawn: return
-        pos = self.find_spot(start_pos)
-        enemy_type = self.get_enemy_type()
-        if pos == None: return
-        self.spawn_enemy(enemy_type, pos)
-    def update(self):
-        if len(enemies) >= self.__class__.max_enemies: return
-        if self.spawn_ticker <= 0:
-            try:
-                self.spawn_seq(player.pos)
-            except: 
-                print(player.pos)
-            self.spawn_ticker = self.__class__.spawn_ticks
-        else:
-            self.spawn_ticker -= self.difficulty_score
-class ScoreManager:
-    def __init__(self):
-        self.score = 0
-        self.high_score = 0
-        self.font = pygame.font.SysFont('Arial', 28)
-        self.small_font = pygame.font.SysFont('Arial', 18)
-
-    def add_score(self, amount):
-        self.score += amount
-        if self.score > self.high_score:
-            self.high_score = self.score
-
-    def reset(self):
-        self.score = 0
-
-    def draw(self, screen):
-        score = self.font.render(f'Score: {self.score}', True, (255, 255, 255))
-        best_score = self.small_font.render(f'Beste: {self.high_score}', True, (180, 180, 180))
-        screen.blit(score, (15, 15))
-        screen.blit(best_score, (15, 50))    
-        
-class Menu:
-    def __init__(self, screen):
-        self.screen = screen
-        self.font_big = pygame.font.SysFont('Arial', 64, bold=True)
-        self.font_med = pygame.font.SysFont('Arial', 36)
-        self.font_small = pygame.font.SysFont('Arial', 24)
-        self.active = True # True = menu wordt getoond
-        self.is_death_screen = False
-
-    def draw(self, high_score=0, last_score=0):
-        overlay = pygame.Surface(self.screen.get_size()).convert_alpha()
-        overlay.fill((0, 0, 0, 180))
-        self.screen.blit(overlay, (0, 0))
-
-        if self.is_death_screen:
-            title = self.font_big.render('GAME OVER', True, (220, 60, 60))
-            score_line = self.font_med.render(f'Score: {last_score}', True, (255, 255, 255))
-            hi_line = self.font_med.render(f'Beste:  {high_score}', True, (180, 180, 180))
-            prompt = self.font_small.render('Druk ENTER om opnieuw te spelen | ESC om te stoppen', True, (200, 200, 200))
-        else:
-            title  = self.font_big.render('SPACE GAME', True, (100, 180, 255))
-            score_line = self.font_med.render('', True, (0,0,0))      # leeg
-            hi_line    = self.font_med.render(f'Best:  {high_score}', True, (180, 180, 180))
-            prompt     = self.font_small.render('Druk ENTER om te starten | ESC om te stoppen', True, (200, 200, 200))
-
-        center_x = self.screen.get_width() // 2
-        center_y = self.screen.get_height() // 2
-
-        self.screen.blit(title, title.get_rect(center=(center_x, center_y - 120)))
-        self.screen.blit(score_line, score_line.get_rect(center=(center_x, center_y - 30)))
-        self.screen.blit(hi_line, hi_line.get_rect(center=(center_x, center_y + 20)))
-        self.screen.blit(prompt, prompt.get_rect(center=(center_x, center_y + 100)))
-
-# %% finished classes
-class Planet(PhysicsObject,VisualObject):
-    # Een planeet: heeft een afbeelding, massa (gebaseerd op dichtheid+grootte) en botst elastisch met andere planeten.
-    def __init__(self, pos, vel, style,density, size = 1):
-        self.style = style
-        image = Planet.get_image(style,size)
-        mass = 2500*density * size ** 2
-        super().__init__(pos = pos ,image = image,vel=vel,mass = mass,hitbox_radius=size*255)
-    
-    def get_image(style,size):
-        if style == 'icy':
-            i = random.randint(0, 4)
-            path = f'graphics/planets/Ice/{i}.png'
-        elif style == 'tropical':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Tropical/{i}.png'
-        elif style == 'desert':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Desert/{i}.png'
-        elif style == 'ocean':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Ocean/{i}.png'
-        elif style == 'earth':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Alpine/{i}.png'
-        elif style == 'moon':
-            i = random.randint(0,4)
-            path = f'graphics/planets/Moons/{i}.png'
-        elif style == 'black_hole':
-            path = 'graphics/planets/BlackHole/0.png'
-        elif style == 'sattelite':
-            path = 'graphics/planets/Satellite/0.png'
-        else:
-            raise ValueError(f'style:{style} is not supported')
-        image = pygame.image.load(path).convert_alpha()
-        image = pygame.transform.rotozoom(image, 0, size)
-        return image     
-
-    def resolve_collisions(self):
-        # Controleer botsingen met andere planeten, (id-check voorkomt dubbele afhandeling)
-        # spaceship botsingen worden afgehandeld in spaceship
-        for planet in planets:
-            if id(planet)< id(self) and self.hit(planet):
-                self.elastic_collision(planet,energy_dis= 0.9)
-               
-    def pre_update(self):
-        if self._is_moving:
-            self.resolve_collisions()
-        super().pre_update()
-    def update(self):
-        
-        super().update()   
-class Player(Spaceship):
-    bullet_type = Bullet
-    bullet_reload = 15
-    max_hp = 15
-    grav_ticker = 1
-    theme_colour = (53, 114, 212)
-    speed = 750
-    
-    # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
-    def __init__(self, pos, vel, angle):
-        super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle, hitbox_radius= 20)
-        self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
-        self.image = self.base_image
-    def input_check(self):
-        # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
-            self.accelerate()
-            
-                
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.angle_moment += 20
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.angle_moment += -20
-        if keys[pygame.K_SPACE]:
-            self.shoot()
-    
-    def update(self):
-        if not debug_freecam: self.input_check()
-        self.vel = self.vel.clamp_magnitude(self.__class__.speed)
-        self.pos_estimation_update()
-        super().update()
-
 class BaseEnemy(Spaceship):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
     spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt - to be implemented
-    bullet_type = Bullet
+    bullet_type = BaseBullet
     bullet_reload = 180 # ticks to reload
     image_path = 'graphics/enemies/enemy_1.png' 
     hitbox_radius = 25
@@ -1208,6 +937,313 @@ class BaseEnemy(Spaceship):
         elif (self.vel - player.vel).magnitude_squared() > self.__class__.max_rel_vel ** 2:
             self.match_vel(player)
         else: self.turn_to(player.pos-self.pos) #self.aim(self.get_pos_pred(player))
+class SniperBullet(BaseBullet):
+    damage = 3
+    speed = 2800
+    lifetime = 300
+    radius = 5
+    texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
+    pygame.draw.circle(texture,(212, 178, 53), (radius, radius), radius)
+    mass = 4 
+class RocketBullet(BaseBullet,RotatingObject):
+    damage = 2
+    speed = 300
+    lifetime = 900
+    radius = 5
+    texture = pygame.image.load('graphics/enemies/5.png')
+    explosion_duration = 45
+    mass = 25
+    snap_cutoff = 0.5
+    to_moment_amplifier = 0.2
+    moment_dampener = 0.01
+    def __init__(self,pos,vel,source):
+        self.current_heading = source.current_heading
+        angle = - self.current_heading.as_polar()[1]
+        super().__init__(pos= pos,vel=vel,source=source , angle = angle)
+        self.base_image = self.base_image.convert_alpha()
+        self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.025)
+        self.image = self.base_image
+        self.enemy_bullet = self.source._is_enemy
+        if not self.enemy_bullet:
+            self.target = min(enemies, key = lambda enemy: (enemy.pos - self.pos).magnitude_squared())
+        
+    def kys(self):
+        active_object.add(Explosion(self.pos, self.__class__.radius * 3, self.__class__.explosion_duration))
+        super().kys()
+    def update(self):
+        if self.enemy_bullet:
+            target_dir = player.pos - self.pos
+        else:
+            target_dir = self.target.pos - self.pos
+        BaseEnemy.turn_to(self, target_dir)
+        Spaceship._orientation_update(self)
+        self.acc += self.current_heading * (self.__class__.lifetime - self.lifetime_ticker)
+        particle_effects.add(TrailParticle(self.pos,radius = 4,color = (235, 125, 52)))
+        super().update()
+class ShotgunPellet(BaseBullet):
+    damage = 1
+    speed = 400
+    lifetime = 120
+    radius = 4
+    texture = pygame.Surface((2*radius, 2*radius), pygame.SRCALPHA)
+    pygame.draw.circle(texture,(48, 43, 186), (radius, radius), radius)
+    mass = 4 
+
+class ChunkManager:
+    def __init__(self,chunk_size = (2000,2000),around_chunks = 1):
+        self.chunk_size = chunk_size
+        self.chunk_x = self.chunk_size[0]
+        self.chunk_y = self.chunk_size[1]
+        self.around_chunks = around_chunks
+        self.central_chunk = (0,0)
+        self.all_chunks = {}
+        self.active_chunks = set()
+        self.min_x = 0
+        self.max_x = 0
+        self.min_y = 0
+        self.max_y = 0
+    
+    def get_chunk(self,pos:pygame.Vector2):
+        return (int(pos.x // self.chunk_x ), int(pos.y //self.chunk_y))
+    def set_active(self,chunk):
+        self.active_chunks.add(chunk)
+        try:
+            for element in self.all_chunks[chunk]:
+                active_object.add(element)
+                if element._is_planet: planets.add(element)
+        except:
+            if not debug_disable_world_gen:
+                self.generate_chunk(chunk)
+            self.all_chunks[chunk] = []
+        
+    def set_inactive(self,chunk):
+        self.active_chunks.remove(chunk)
+    def active_chunk_update(self):
+        new_active_chunk = set()
+        for i in range(self.central_chunk[0]-self.around_chunks,self.central_chunk[0]+self.around_chunks+1):
+            for j in range(self.central_chunk[1]-self.around_chunks,self.central_chunk[1]+self.around_chunks+1):
+                chunk = (i,j)
+                new_active_chunk.add(chunk)
+        for chunk in new_active_chunk.difference(self.active_chunks):
+            self.set_active(chunk)
+        for chunk in self.active_chunks.difference(new_active_chunk):
+            self.set_inactive(chunk)
+        self.active_chunks = new_active_chunk
+    def calculate_safezone(self):
+        self.min_x = (self.central_chunk[0] - self.around_chunks) * self.chunk_size[0]
+        self.max_x = (self.central_chunk[0] + self.around_chunks+1) * self.chunk_size[0]
+        self.min_y = (self.central_chunk[1] - self.around_chunks) * self.chunk_size[1]
+        self.max_y = (self.central_chunk[1] + self.around_chunks+1) * self.chunk_size[1]
+    def in_safezone(self,pos:pygame.Vector2):
+        if pos.x < self.max_x and pos.x > self.min_x and pos.y < self.max_y and pos.y > self.min_y:
+            return True
+        return False
+    def get_center(self,chunk): 
+        return pygame.Vector2((chunk[0] + 0.5 )*self.chunk_x,(chunk[1] + 0.5 )*self.chunk_y)
+    def generate_chunk(self, chunk):
+        chunk_center = self.get_center(chunk)
+        random_pos = 500
+        chunk_center += pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
+        prefab = random.choice(list(all_prefabs.values()))
+        self.all_chunks[chunk] = prefab(chunk_center)
+        
+        delta = pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
+        enemy_manager.spawn_seq(chunk_center+delta)
+            
+    def update(self):
+        self.central_chunk = self.get_chunk(player.pos)
+        self.active_chunk_update()
+        self.calculate_safezone()
+
+class EnemyManager:
+    min_spawn_dist = 3000
+    max_spawn_dist = 8000
+    max_enemies = 30
+    spawn_ticks = 300 # number of ticks between enemy spawns at difficulty 1
+    def __init__(self):
+        self.all_enemies = all_enemy_types
+        self.weights = [t.spawn_weight for t in self.all_enemies]
+        self.spawn_ticker = self.__class__.spawn_ticks
+        self.difficulty_score = 1 # larger = more difficult
+    def spawn_enemy(self,enemy_type,pos):
+        if debug_disable_enemy_spawn: return
+        enemy = enemy_type(pos)
+        active_object.add(enemy)
+        enemies.add(enemy)
+    def get_enemy_type(self):
+        return random.choices(self.all_enemies, weights=self.weights, k=1)[0]
+    def find_spot(self,pos:pygame.Vector2, min_dist = None, max_dist =None):
+        max_dist = max_dist or self.__class__.max_spawn_dist
+        min_dist = min_dist or self.__class__.min_spawn_dist
+        dist = random.uniform(min_dist,max_dist)
+        angle = random.uniform(0,360)
+        delta = pygame.Vector2.from_polar((dist,angle))
+        pos = pygame.Vector2(pos) + delta
+        tester = Predictor(pos, mass = Spaceship.standard_mass)
+        for i in range(5):
+            tester.pre_update()
+            f = tester.force
+            if f.magnitude_squared() < 2000 ** 2 and (pos-player.pos).magnitude_squared() > self.__class__.min_spawn_dist ** 2:
+                return pos
+            f += pygame.Vector2(0.1,0.1)
+            tester.pos -= 10* f / (f*f) ** 0.25
+        return None
+    def spawn_seq(self,start_pos):
+        if debug_disable_enemy_spawn: return
+        pos = self.find_spot(start_pos)
+        enemy_type = self.get_enemy_type()
+        if pos == None: return
+        self.spawn_enemy(enemy_type, pos)
+    def update(self):
+        if len(enemies) >= self.__class__.max_enemies: return
+        if self.spawn_ticker <= 0:
+            try:
+                self.spawn_seq(player.pos)
+            except: 
+                print(player.pos)
+            self.spawn_ticker = self.__class__.spawn_ticks
+        else:
+            self.spawn_ticker -= self.difficulty_score
+class ScoreManager:
+    def __init__(self):
+        self.score = 0
+        self.high_score = 0
+        self.font = pygame.font.SysFont('Arial', 28)
+        self.small_font = pygame.font.SysFont('Arial', 18)
+
+    def add_score(self, amount):
+        self.score += amount
+        if self.score > self.high_score:
+            self.high_score = self.score
+
+    def reset(self):
+        self.score = 0
+
+    def draw(self, screen):
+        score = self.font.render(f'Score: {self.score}', True, (255, 255, 255))
+        best_score = self.small_font.render(f'Beste: {self.high_score}', True, (180, 180, 180))
+        screen.blit(score, (15, 15))
+        screen.blit(best_score, (15, 50))    
+        
+class Menu:
+    def __init__(self, screen):
+        self.screen = screen
+        self.font_big = pygame.font.SysFont('Arial', 64, bold=True)
+        self.font_med = pygame.font.SysFont('Arial', 36)
+        self.font_small = pygame.font.SysFont('Arial', 24)
+        self.active = True # True = menu wordt getoond
+        self.is_death_screen = False
+
+    def draw(self, high_score=0, last_score=0):
+        overlay = pygame.Surface(self.screen.get_size()).convert_alpha()
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        if self.is_death_screen:
+            title = self.font_big.render('GAME OVER', True, (220, 60, 60))
+            score_line = self.font_med.render(f'Score: {last_score}', True, (255, 255, 255))
+            hi_line = self.font_med.render(f'Beste:  {high_score}', True, (180, 180, 180))
+            prompt = self.font_small.render('Druk ENTER om opnieuw te spelen | ESC om te stoppen', True, (200, 200, 200))
+        else:
+            title  = self.font_big.render('SPACE GAME', True, (100, 180, 255))
+            score_line = self.font_med.render('', True, (0,0,0))      # leeg
+            hi_line    = self.font_med.render(f'Best:  {high_score}', True, (180, 180, 180))
+            prompt     = self.font_small.render('Druk ENTER om te starten | ESC om te stoppen', True, (200, 200, 200))
+
+        center_x = self.screen.get_width() // 2
+        center_y = self.screen.get_height() // 2
+
+        self.screen.blit(title, title.get_rect(center=(center_x, center_y - 120)))
+        self.screen.blit(score_line, score_line.get_rect(center=(center_x, center_y - 30)))
+        self.screen.blit(hi_line, hi_line.get_rect(center=(center_x, center_y + 20)))
+        self.screen.blit(prompt, prompt.get_rect(center=(center_x, center_y + 100)))
+
+# %% finished classes
+class Planet(PhysicsObject,VisualObject):
+    # Een planeet: heeft een afbeelding, massa (gebaseerd op dichtheid+grootte) en botst elastisch met andere planeten.
+    def __init__(self, pos, vel, style,density, size = 1):
+        self.style = style
+        image = Planet.get_image(style,size)
+        mass = 2500*density * size ** 2
+        super().__init__(pos = pos ,image = image,vel=vel,mass = mass,hitbox_radius=size*255)
+    
+    def get_image(style,size):
+        if style == 'icy':
+            i = random.randint(0, 4)
+            path = f'graphics/planets/Ice/{i}.png'
+        elif style == 'tropical':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Tropical/{i}.png'
+        elif style == 'desert':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Desert/{i}.png'
+        elif style == 'ocean':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Ocean/{i}.png'
+        elif style == 'earth':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Alpine/{i}.png'
+        elif style == 'moon':
+            i = random.randint(0,4)
+            path = f'graphics/planets/Moons/{i}.png'
+        elif style == 'black_hole':
+            path = 'graphics/planets/BlackHole/0.png'
+        elif style == 'sattelite':
+            path = 'graphics/planets/Satellite/0.png'
+        else:
+            raise ValueError(f'style:{style} is not supported')
+        image = pygame.image.load(path).convert_alpha()
+        image = pygame.transform.rotozoom(image, 0, size)
+        return image     
+
+    def resolve_collisions(self):
+        # Controleer botsingen met andere planeten, (id-check voorkomt dubbele afhandeling)
+        # spaceship botsingen worden afgehandeld in spaceship
+        for planet in planets:
+            if id(planet)< id(self) and self.hit(planet):
+                self.elastic_collision(planet,energy_dis= 0.9)
+               
+    def pre_update(self):
+        if self._is_moving:
+            self.resolve_collisions()
+        super().pre_update()
+    def update(self):
+        
+        super().update()   
+class Player(Spaceship):
+    bullet_type = RocketBullet
+    bullet_reload = 15
+    max_hp = 15
+    grav_ticker = 1
+    theme_colour = (53, 114, 212)
+    speed = 750
+    
+    # De door de speler bestuurde ruimteschip. Leest toetsinvoer en past versnelling/rotatie aan.
+    def __init__(self, pos, vel, angle):
+        super().__init__(pos = pos, image = 'graphics/player/player.png',vel = vel, angle = angle, hitbox_radius= 20)
+        self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
+        self.image = self.base_image
+    def input_check(self):
+        # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_UP] or keys[pygame.K_w]:
+            self.accelerate()
+            
+                
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            self.angle_moment += 20
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            self.angle_moment += -20
+        if keys[pygame.K_SPACE]:
+            self.shoot()
+    
+    def update(self):
+        if not debug_freecam: self.input_check()
+        self.vel = self.vel.clamp_magnitude(self.__class__.speed)
+        self.pos_estimation_update()
+        super().update()
+
+
         
 class Explosion(CircularHitbox):
     damage = 3
@@ -1229,10 +1265,7 @@ class SimpleEnemy(BaseEnemy):
     spawn_weight = 4
     
 class SniperEnemy(BaseEnemy):
-    # Dit is een basis vijand, alle andere vijanden erven hiervan
-    # Verander deze waarden in de subklassen om een ander type vijand te maken
-    spawn_weight = 3      # hoe groter, hoe vaker dit type spawnt - to be implemented
-    bullet_type = Bullet
+    spawn_weight = 3      # hoe groter, hoe vaker dit type spawnt
     bullet_reload = 300 # ticks to reload
     image_path = 'graphics/enemies/enemy_3.png' 
     hitbox_radius = 25
@@ -1262,7 +1295,6 @@ class SuicideEnemy(BaseEnemy):
     # Dit is een basis vijand, alle andere vijanden erven hiervan
     # Verander deze waarden in de subklassen om een ander type vijand te maken
     spawn_weight = 2      # hoe groter, hoe vaker dit type spawnt - to be implemented
-    bullet_type = Bullet
     bullet_reload = 180 # ticks to reload
     image_path = 'graphics/enemies/enemy_4.png' 
     hitbox_radius = 25
@@ -1307,9 +1339,26 @@ class ShotgunEnemy(BaseEnemy):
             bullet = self.__class__.bullet_type(self.pos,self.vel + aim * self.__class__.bullet_type.speed * random.uniform(0.5,1),self)
             bullets.add(bullet)      
             self.bullet_ticker = self.__class__.bullet_reload      
-# Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
-all_enemy_types = [ SimpleEnemy, SniperEnemy,SuicideEnemy,ShotgunEnemy]
 
+class RocketEnemy(BaseEnemy):
+    spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt
+    bullet_reload = 300 # ticks to reload
+    image_path = 'graphics/enemies/7.png' 
+    hitbox_radius = 30
+    max_hp = 3
+    # navigate_to_point
+    perp_correction_cutoff = 100 # perp vel at which correction starts
+    # check_visual (player finding)
+    max_player_dist = 3500 # distance at which player if fully forgotten
+    # player interact
+    approach_dist = 1200 # distance beyond which the enemy approaches
+    max_rel_vel = 500 # maximum relative velocity before correcting
+    pre_aim_ticks = 50 # ammount of ticks ahead of shooting the enemy starts to aim 
+    speed = 350
+    bullet_type = RocketBullet
+    theme_colour = (196, 90, 20)
+# Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
+all_enemy_types = [ SimpleEnemy, SniperEnemy,SuicideEnemy,ShotgunEnemy,RocketEnemy] 
 
 class DebugMass(PhysicsObject,VisualObject):
     def __init__(self):
@@ -1594,6 +1643,7 @@ def main():
         camera.player_predict_draw()
         if debug:
             camera.debug_draw(active_object)
+            if debug_bullets: camera.debug_draw(bullets)
         camera.finalise()
         score_manager.draw(camera.final_screen)
         camera.draw_player_hp(player)
@@ -1626,7 +1676,7 @@ try:
     debug_world_gen = False
     debug_enemy = False
     debug_disable_enemy_spawn = False
-    
+    debug_bullets = True
     player = Player(pos=(0,0),vel=(0,200),angle= 0)
     camera = Camera(screen)
     clock = pygame.time.Clock()
