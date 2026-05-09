@@ -281,7 +281,7 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
         self._is_predictor = isinstance(self, Predictor)
         self._is_target = isinstance(self, Target)
         self._is_player = isinstance(self, Player)
-        
+        self._is_item = isinstance(self, Item)
     def elastic_collision(self, other,energy_dis = 1, reflective = True , damage_multiplier = 0):
          """
         Verwerkt een elastische botsing tussen dit object en "other".
@@ -388,7 +388,7 @@ class Predictor(PhysicsObject):
     
     def update(self):
         for obj in active_object:
-            if self.hit(obj) and obj._is_physics:
+            if self.hit(obj) and obj._is_physics and obj._is_item:
                 self.elastic_collision(obj,energy_dis=1.1,reflective=False)
         super().update()
 
@@ -1015,8 +1015,8 @@ class RocketBullet(BaseBullet,RotatingObject):
     mass = 25
     snap_cutoff = 0.5
     to_moment_amplifier = 0.1
-    moment_dampener = 0.01
-    perp_correction_cutoff = 50
+    moment_dampener = 0.05
+    perp_correction_cutoff = 15
     min_approach_speed = 300
     def __init__(self,pos,vel,source):
         self.current_heading = source.current_heading
@@ -1276,8 +1276,6 @@ class Planet(PhysicsObject,VisualObject):
         
         super().update()   
 class Player(Spaceship):
-    bullet_type = RocketBullet
-    bullet_reload = 15
     max_hp = 15
     grav_ticker = 1
     theme_colour = (53, 114, 212)
@@ -1289,13 +1287,27 @@ class Player(Spaceship):
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.04)
         self.image = self.base_image
         self.auto_score_ticker = self.__class__.auto_score_ticks
+        self.current_gun = 'Basic'
+        self._bullettype_update()
+    def _bullettype_update(self):
+        if self.current_gun == 'Rocket':
+            self.bullet_reload = 250
+            self.bullet_type = RocketBullet
+        elif self.current_gun == 'Sniper':
+            self.bullet_reload = 40
+            self.bullet_type = SniperBullet
+        elif self.current_gun == 'Shotgun':
+            self.bullet_reload = 100
+            self.bullet_type = ShotgunPellet
+        else:
+            self.bullet_reload = 30
+            self.bullet_type = BaseBullet
+            
     def input_check(self):
         # Verwerkt toetsinvoer: pijl omhoog = gas, links/rechts = draaien
         keys = pygame.key.get_pressed()
         if keys[pygame.K_UP] or keys[pygame.K_w]:
-            self.accelerate()
-            
-                
+            self.accelerate()       
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
             self.angle_moment += 20
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
@@ -1306,7 +1318,17 @@ class Player(Spaceship):
             self.charge_up_animation(30)
         if keys[pygame.K_t]:
             self.heal_animation()
-    
+    def shoot(self):
+        if self.bullet_ticker > 0 : return
+        if self.current_gun == 'Shotgun':
+            for i in range(8):
+                aim = self.current_heading.rotate(random.uniform(-10, 10))
+                bullet = self.bullet_type(self.pos,self.vel + aim * self.__class__.bullet_type.speed * random.uniform(0.5,1),self)
+                bullets.add(bullet) 
+        else:
+            bullet = self.bullet_type(self.pos,self.vel + self.current_heading * self.bullet_type.speed,self)
+            bullets.add(bullet)      
+        self.bullet_ticker = self.bullet_reload 
     def update(self):
         if not debug_freecam: self.input_check()
         self.vel = self.vel.clamp_magnitude(self.__class__.speed)
@@ -1316,10 +1338,7 @@ class Player(Spaceship):
             self.auto_score_ticker = self.__class__.auto_score_ticks
         else:
             self.auto_score_ticker -= 1
-        super().update()
-
-
-        
+        super().update()     
 class Explosion(CircularHitbox):
     damage = 3
     def __init__(self,pos,radius,duration):
@@ -1337,12 +1356,18 @@ class Explosion(CircularHitbox):
         if self.duration <= 0: self.kys()
 class SimpleEnemy(BaseEnemy):
     theme_colour = (199, 59, 28)
+    bullet_reload = 120
     spawn_weight = 4
     score = 30
+    drop_chance = 0.1
+    def kys(self):
+        if random.uniform(0, 1) <= self.__class__.drop_chance:
+            active_object.add(BasicGunItem(self.pos))
+        super().kys()
 class SniperEnemy(BaseEnemy):
     score  = 50
-    spawn_weight = 3      # hoe groter, hoe vaker dit type spawnt
-    bullet_reload = 300 # ticks to reload
+    spawn_weight = 3
+    bullet_reload = 200 # ticks to reload
     image_path = 'graphics/enemies/enemy_3.png' 
     hitbox_radius = 25
     max_hp = 2
@@ -1357,6 +1382,11 @@ class SniperEnemy(BaseEnemy):
     speed = 350
     bullet_type = SniperBullet
     theme_colour = (212, 178, 53)
+    drop_chance = 0.6
+    def kys(self):
+        if random.uniform(0, 1) <= self.__class__.drop_chance:
+            active_object.add(SniperGunItem(self.pos))
+        super().kys()
     def back_up(self , player):
         player_vect = player.pos - self.pos
         if self.current_heading * player_vect < 0:
@@ -1369,9 +1399,7 @@ class SniperEnemy(BaseEnemy):
         super().player_interact()
 class SuicideEnemy(BaseEnemy):
     score  = 60
-    # Dit is een basis vijand, alle andere vijanden erven hiervan
-    # Verander deze waarden in de subklassen om een ander type vijand te maken
-    spawn_weight = 2      # hoe groter, hoe vaker dit type spawnt - to be implemented
+    spawn_weight = 2
     bullet_reload = 180 # ticks to reload
     image_path = 'graphics/enemies/enemy_4.png' 
     hitbox_radius = 25
@@ -1391,30 +1419,27 @@ class SuicideEnemy(BaseEnemy):
         self.kys()
 class ShotgunEnemy(BaseEnemy):
     score = 80
-    # Dit is een basis vijand, alle andere vijanden erven hiervan
-    # Verander deze waarden in de subklassen om een ander type vijand te maken
-    spawn_weight = 2    # hoe groter, hoe vaker dit type spawnt - to be implemented
+    spawn_weight = 2   
     bullet_type = ShotgunPellet
     image_path = 'graphics/enemies/enemy_2.png' 
     max_hp = 4
     min_approach_speed = 350
-
-    
-
     visual_cone_angle = 110 # degrees of visual cone
-
     approach_dist = 400 # distance beyond which the enemy approaches
     max_rel_vel = 100 # maximum relative velocity before correcting
-  
-    
     theme_colour = (48, 43, 186)
+    drop_chance = 0.7
+    def kys(self):
+        if random.uniform(0, 1) <= self.__class__.drop_chance:
+            active_object.add(ShotgunItem(self.pos))
+        super().kys()
     def shoot(self):
         if self.bullet_ticker > 0 : return
         for i in range(8):
             aim = self.current_heading.rotate(random.uniform(-10, 10))
             bullet = self.__class__.bullet_type(self.pos,self.vel + aim * self.__class__.bullet_type.speed * random.uniform(0.5,1),self)
             bullets.add(bullet)      
-            self.bullet_ticker = self.__class__.bullet_reload      
+        self.bullet_ticker = self.__class__.bullet_reload      
 class RocketEnemy(BaseEnemy):
     score = 140
     spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt
@@ -1433,6 +1458,11 @@ class RocketEnemy(BaseEnemy):
     speed = 350
     bullet_type = RocketBullet
     theme_colour = (196, 90, 20)
+    drop_chance = 0.3
+    def kys(self):
+        if random.uniform(0, 1) <= self.__class__.drop_chance:
+            active_object.add(RocketGunItem(self.pos))
+        super().kys()
 class HealingEnemy(BaseEnemy):
     spawn_weight = 1      # hoe groter, hoe vaker dit type spawnt - to be implemented
     score  = 100
@@ -1449,9 +1479,14 @@ class HealingEnemy(BaseEnemy):
     visual_cone_angle = 100 # degrees of visual cone
     player_max_memory = 2000 # how many ticks the player is remembered for
     
-    charge_up_length = 600
+    charge_up_length = 480
     heal_radius = 500
     theme_colour = (40, 184, 107)
+    drop_chance = 0.9
+    def kys(self):
+        if random.uniform(0, 1) <= self.__class__.drop_chance:
+            active_object.add(HealItem(self.pos))
+        super().kys()
     def __init__(self,pos,vel=0,angle=0,**kwargs):
         super().__init__(pos = pos, vel = vel, angle= angle, **kwargs)
         self.closest_ally = None
@@ -1486,6 +1521,7 @@ class HealingEnemy(BaseEnemy):
                     enemy.heal()
         elif self.player_memory > 0:
             self.charge_up()
+        self.enemy_mem_ticker -= 1
         super().update()
 # Lijst van alle vijandtypes — voeg hier nieuwe types toe als je ze maakt
 all_enemy_types = [ SimpleEnemy, SniperEnemy,SuicideEnemy,ShotgunEnemy,RocketEnemy,HealingEnemy] 
@@ -1509,7 +1545,79 @@ class DebugMass(PhysicsObject,VisualObject):
             self.mass = 0.01
             self.vel = pygame.Vector2(0)
         super().update()
-                   
+class Item(PhysicsObject,VisualObject):
+    background_colour = (255,255,255)
+    border_size = 3
+    def __init__(self,pos,foreground_image,**kwargs):
+        w,h = foreground_image.get_size()
+        background = pygame.Surface((w + 2* self.__class__.border_size,h + 2* self.__class__.border_size),pygame.SRCALPHA)
+        cx, cy = background.get_size()
+        cx, cy = cx//2, cy//2
+        radius = max(h,w)//2
+        pygame.draw.circle(background, (*self.__class__.background_colour, 200), (cx,cy), radius + self.__class__.border_size)
+        pygame.draw.circle(background, (*self.__class__.background_colour, 150), (cx,cy), radius)
+        
+        background.blit(foreground_image,(self.__class__.border_size,self.__class__.border_size))
+        super().__init__(pos,image= background,mass = 20,hitbox_radius = radius + 3,**kwargs)
+    def check_collision(self):
+        for sprite in active_object:
+            if not sprite._is_physics: continue
+            if self.hit(sprite): 
+                if sprite._is_planet:
+                    if sprite.style == 'black_hole': self.kys()
+                    self.elastic_collision(sprite,energy_dis= 1.8)
+                if sprite._is_spaceship:
+                    if sprite._is_player: self.pickup(player)
+                    self.elastic_collision(sprite, energy_dis = 0.5)
+    def pickup(self,pickup):
+        pass
+    def update(self):
+        self.check_collision()
+        super().update()
+class HealItem(Item):
+    image_path = 'graphics/enemies/6.png'
+    background_colour = HealingEnemy.theme_colour
+    def __init__(self,pos,**kwargs):
+         foreground_image = pygame.image.load(self.__class__.image_path)
+         foreground_image = foreground_image.convert_alpha()
+         foreground_image = pygame.transform.rotozoom(foreground_image, 0, 0.025)
+         super().__init__(pos,foreground_image,**kwargs)
+    def pickup(self,player):
+        if player.hp != player.__class__.max_hp:
+            player.heal(8)
+        else:
+            score_manager.add_score(50)
+        self.kys()
+class GunItem(Item):
+    background_colour = RocketEnemy.theme_colour
+    name = 'Rocket'
+    image_path = 'graphics/enemies/5.png'
+    def __init__(self,pos,**kwargs):
+        foreground_image = pygame.image.load(self.__class__.image_path)
+        foreground_image = foreground_image.convert_alpha()
+        foreground_image = pygame.transform.rotozoom(foreground_image, 0, 0.025)
+        super().__init__(pos,foreground_image,**kwargs)
+    def pickup(self,ship):
+        if ship.current_gun == self.__class__.name:
+            score_manager.add_score(20)
+        else:
+            ship.current_gun = self.__class__.name
+            ship._bullettype_update()
+        self.kys()
+class RocketGunItem(GunItem):
+    pass
+class ShotgunItem(GunItem):
+    background_colour = ShotgunEnemy.theme_colour
+    name = 'Shotgun'
+    image_path = 'graphics/enemies/Enemy_2.png'
+class BasicGunItem(GunItem):
+    background_colour = SimpleEnemy.theme_colour
+    name = 'Basic'
+    image_path = 'graphics/enemies/Enemy_1.png'
+class SniperGunItem(GunItem):
+    background_colour = SniperEnemy.theme_colour
+    name = 'Sniper'
+    image_path = 'graphics/enemies/Enemy_3.png'
 class Target(PhysicsObject, VisualObject):
 # Een doelobject om op te schieten.
 
@@ -1734,9 +1842,11 @@ def main():
                         debug_enemy_obj = HealingEnemy(pos=(400, 0), vel=(0, 100), angle=180)
                         active_object.add(debug_enemy_obj)
                         enemies.add(debug_enemy_obj)
-                        debug_enemy_obj = SniperEnemy(pos=(450, 0), vel=(0, 100), angle=180)
-                        active_object.add(debug_enemy_obj)
-                        enemies.add(debug_enemy_obj)
+                        active_object.add(ShotgunItem((200 ,- 400)))
+                        active_object.add(RocketGunItem((200, - 200)))
+                        active_object.add(SniperGunItem((200, 0)))
+                        active_object.add(BasicGunItem((200, 200)))
+                        active_object.add(HealItem((200,400)))
                     else:
                         simpel_planet_spawn(player.pos, vel=(0, 0))
                 if event.key == pygame.K_p and not menu.active:
