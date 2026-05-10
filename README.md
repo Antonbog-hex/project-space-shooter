@@ -72,11 +72,11 @@ Je begint met het basiswapen. Door vijanden te verslaan kun je wapens oppikken d
 | SimpleEnemy | 3 | 30 | Standaard aanvaller, laat Basic-wapen vallen |
 | SniperEnemy | 2 | 50 | Houdt afstand, hoog bereik, laat Sniper vallen |
 | SuicideEnemy | 2 | 60 | Vliegt recht op je af en explodeert |
-| ShotgunEnemy | 4 | 80 | Robuust, vuurt hagel af, laat Shotgun vallen |
+| ShotgunEnemy | 4 | 80 | Robuust, vuurt meerdere kogels af, laat Shotgun vallen |
 | RocketEnemy | 3 | 140 | Vuurt zelfgeleide raketten af |
 | HealingEnemy | 3 | 100 | Heelt nabijgelegen bondgenoten, laat Heal-item vallen |
 
-Alle vijanden hebben een gezichtskegel en geheugen: als ze je eenmaal zien, onthouden ze je voor een bepaald aantal frames. Ze gebruiken baanvoorspelling om te mikken.
+Alle vijanden hebben een geheugen: als ze je eenmaal zien, onthouden ze je voor een bepaald aantal frames. Ze gebruiken baanvoorspelling om te mikken.
 
 ---
 
