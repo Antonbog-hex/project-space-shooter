@@ -147,7 +147,7 @@ class HealingEnemy(BaseEnemy):
         self.last_animated_charge = 0
     def find_ally(self):
         enemies_local = g.enemies.copy()
-        enemies_local.remove(self)
+        if self in enemies_local: enemies_local.remove(self)
         if len(g.enemies) == 0: 
             ally = None
         else:

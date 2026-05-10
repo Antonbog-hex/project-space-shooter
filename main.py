@@ -1,22 +1,15 @@
 import pygame
 import traceback
 import gamestate as g
+from constants import fps, debug_freecam
 from rendering import Camera
 from player import Player
 from managers import ActiveObjects, ChunkManager, EnemyManager, ScoreManager, Menu
-
+containers = [g.active_object,g.bullets,g.enemies,g.particle_effects]
 def empty_bin(waste_bin):
     for obj in waste_bin:
-        try: g.d.remove(obj)
-        except: pass
-        try: g.bullets.remove(obj)
-        except: pass
-        try: g.planets.remove(obj)
-        except: pass
-        try: g.enemies.remove(obj)
-        except: pass
-        try: g.particle_effects.remove(obj)
-        except: pass
+        for container in containers:
+            if obj in container: container.remove(obj)
     g.waste_bin.clear()
 
 def reset_game():
@@ -60,7 +53,7 @@ def main():
             g.camera.finalise()
             g.menu.draw(high_score=g.score_manager.high_score, last_score=g.score_manager.score)
             pygame.display.update()
-            clock.tick(g.fps)
+            clock.tick(fps)
             continue
         
         g.chunkmanager.update()
@@ -71,7 +64,7 @@ def main():
         g.planets.resolve_pending_add()
         g.particle_effects.update()
         
-        if g.debug_freecam:
+        if debug_freecam:
             g.camera.freecam()
             g.player.pos = g.camera.pos
         else:
@@ -93,7 +86,7 @@ def main():
             g.camera.draw_player_hp(g.player)
         empty_bin(g.waste_bin)
         pygame.display.update()
-        clock.tick(g.fps)
+        clock.tick(fps)
 
 pygame.init()
 try:

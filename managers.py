@@ -1,10 +1,11 @@
 import pygame
 import random
-import constants as g
+import gamestate as g
 from constants import debug_disable_world_gen,debug_disable_enemy_spawn
 from base_classes import PhysicsObject
 from physics import Predictor
-from spaceships import all_enemy_types, Spaceship
+from spaceships import Spaceship
+from enemies import all_enemy_types
 from planets import all_prefabs
 
 
