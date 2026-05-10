@@ -47,6 +47,7 @@ class HealItem(Item):
         if player.hp != player.__class__.max_hp:
             player.heal(8)
         else:
+            player.heal_animation()
             g.score_manager.add_score(50)
         self.kys()
 class GunItem(Item):

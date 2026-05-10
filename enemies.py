@@ -5,7 +5,7 @@ from items import BasicGunItem, SniperGunItem, ShotgunItem, RocketGunItem, HealI
 from constants import (simple_theme_colour,sniper_theme_colour,suicide_theme_colour,
                        shotgun_theme_colour,rocket_theme_colour,healer_theme_colour)
 from bullets import SniperBullet, ShotgunPellet, RocketBullet,BaseBullet
-from physics import Explosion
+from other_objects import Explosion
 class SimpleEnemy(BaseEnemy):
     theme_colour = simple_theme_colour
     bullet_type = BaseBullet

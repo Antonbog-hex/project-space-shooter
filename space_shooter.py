@@ -2,7 +2,11 @@ import pygame
 import traceback
 import random
 import math
+'''
+This is legacy code.
+see main.py for code running on seperate files
 
+'''
 raise Exception()
 # Klassen
 # %% basic classes

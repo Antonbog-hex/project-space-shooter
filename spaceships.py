@@ -3,7 +3,7 @@ import gamestate as g
 import math
 from base_classes import PhysicsObject, RotatingObject,LineHitbox
 from rendering import VisualObject
-from physics import Predictor, Explosion
+from other_objects import Predictor, Explosion
 from effects import TrailParticle
 from constants import fps,timestep,debug_enemy
 
@@ -29,7 +29,7 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         self.position_estimation = [self.pos for i in range(5)]
         self.hp = self.__class__.max_hp
         self.shield = self.__class__.max_shield
-        self.shield_regen_ticker = 0
+        self.shield_ticker = 0
         self.bullet_ticker = self.__class__.bullet_reload
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle)) # direction of pointing normvector
     def accelerate(self):
@@ -50,7 +50,7 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
             self.position_estimation.append(tester.pos)
         
     def take_damage(self, amount=1):
-        self.shield_regen_ticker = 750
+        self.shield_regenticker = 750
         if self.shield > 0:
             self.shield -= amount
             amount = 0
@@ -84,17 +84,20 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
                 if sprite._is_spaceship:
                     self.elastic_collision(sprite, energy_dis = 1.4, damage_multiplier= 1)
     def shield_regen(self):
-        if self.shield >= min(self.__class__.max_shield, self.hp): 
+        if self.shield >= min(self.__class__.max_shield, self.hp):
+            self.shield_animation(60)
+            print('test')
+            self.shield_ticker = max(self.shield_ticker , 300)
             return
         else:
             self.shield += 1
-            self.shield_regen_ticker = 30
+            self.shield_ticker = 30
             self.shield_animation(30)
     def _orientation_update(self):
         self.current_heading = pygame.Vector2.from_polar((1, -self.angle))
     def update(self):
         if self.bullet_ticker > 0 : self.bullet_ticker -= 1
-        if self.shield_regen_ticker > 0 : self.shield_regen_ticker -= 1
+        if self.shield_ticker > 0 : self.shield_ticker -= 1
         else: self.shield_regen()
         self.angle_dampen()
         self.resolve_collisions()

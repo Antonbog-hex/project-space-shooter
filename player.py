@@ -45,6 +45,8 @@ class Player(Spaceship):
             self.angle_moment += -20
         if keys[pygame.K_SPACE]:
             self.shoot()
+        if keys[pygame.K_r]:
+            self.shield_animation(30)
     def shoot(self):
         if self.bullet_ticker > 0 : return
         if self.current_gun == 'Shotgun':

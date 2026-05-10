@@ -1,12 +1,12 @@
 import pygame
 import traceback
 import gamestate as g
-from constants import fps, debug_freecam,debug,debug_bullets
+from constants import fps, debug_freecam,debug,debug_bullets,debug_item,debug_enemy
 from rendering import Camera
 from player import Player
 from managers import ActiveObjects, ChunkManager, EnemyManager, ScoreManager, Menu
-
-
+from enemies import SimpleEnemy,SniperEnemy,ShotgunEnemy,RocketEnemy,SuicideEnemy,HealingEnemy
+from items import RocketGunItem,ShotgunItem,BasicGunItem,HealItem,SniperGunItem
 def empty_bin(waste_bin):
     
     containers = [g.active_object,g.planets,g.bullets,g.enemies,g.particle_effects]
@@ -50,7 +50,15 @@ def main():
                     if g.menu.active:
                         g.menu.active = False
                         reset_game()
-        
+                        if debug_enemy:
+                            for i, enemy in enumerate([SimpleEnemy,SniperEnemy,ShotgunEnemy,HealingEnemy,SuicideEnemy,RocketEnemy]):
+                                enemy = enemy(pos=pygame.Vector2(200, 800 - i* 100))
+                                g.active_object.add(enemy)
+                                g.enemies.add(enemy)
+                        if debug_item:
+                            for i, item in enumerate([RocketGunItem,ShotgunItem,SniperGunItem,BasicGunItem,HealItem]):
+                                item = item(pos=pygame.Vector2(-200, 800 - i* 100))
+                                g.active_object.add(item)
         if g.menu.active:
             g.camera.background_draw()
             g.camera.finalise()
