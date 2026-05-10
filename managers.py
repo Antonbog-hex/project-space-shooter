@@ -3,7 +3,7 @@ import random
 import gamestate as g
 from constants import debug_disable_world_gen,debug_disable_enemy_spawn
 from base_classes import PhysicsObject
-from physics import Predictor
+from other_objects import Predictor
 from spaceships import Spaceship
 from enemies import all_enemy_types
 from planets import all_prefabs

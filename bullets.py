@@ -3,7 +3,7 @@ import gamestate as g
 from base_classes import PhysicsObject,RotatingObject
 from rendering import VisualObject
 from spaceships import BaseEnemy , Spaceship
-from physics import Explosion
+from other_objects import Explosion
 from effects import TrailParticle
 def init_textures():
     r = BaseBullet.radius
