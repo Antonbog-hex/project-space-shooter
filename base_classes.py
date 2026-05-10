@@ -59,7 +59,7 @@ class GravityObject(BasicObject):
         self.mass = mass
         # Spreidt de eerste gravitatieberekening willekeurig over meerdere frames,
         # zodat niet alle objecten tegelijk berekend worden (performance)
-        self.grav_calc_ticker = random.randint(0,self.__class__.grav_ticker)
+        self.grav_calc_ticker = random.randint(0,self.__class__.grav_ticker) # this ensures grav calc gets spread evenly
         self.reaction_f = pygame.Vector2(0) # this is a var used to lower grav calc using action-reaction principle
         self.force = pygame.Vector2(0)      # Totale kracht die op dit object werkt
 
@@ -70,7 +70,7 @@ class GravityObject(BasicObject):
             if self._is_bullet and self.source == other: return (0,0)
             if self._is_predictor and self.source == other: return (0,0)
         
-        # Geen berekening nodig als de posities gelijk zijn of het object stilstaat
+        # Geen berekening nodig als de posities gelijk zijn of het object niet kan bewegen
         if self.pos == other.pos or not self._is_moving:
             return
         diff = other.pos - self.pos
@@ -81,7 +81,8 @@ class GravityObject(BasicObject):
         # Standaard gravitatiewet: F = G * m1 * m2 / r²  (als vector)
         f = grav_cte * self.mass * other.mass * diff / dist_sq ** 1.5
 
-        # Spaceships krijgen een extra aantrekkingskracht op korte afstand zodat ze makkelijker in een baan blijven
+        # Spaceships krijgen een extra kleine aantrekkingskracht 
+        # die minder snel afneemt zodat ze makkelijker in een baan blijven
         if self._is_spaceship:
             f += grav_cte * 0.01 * self.mass * other.mass * diff / dist_sq ** 1.3
         
@@ -102,7 +103,8 @@ class GravityObject(BasicObject):
         else:
             force = pygame.Vector2(0)
         
-        for planet in g.planets: #planets is a global, changed from active_objects to improve performance
+        for planet in g.planets: # enkel planeten zijn bronnen van gravitatie, spaceship-spaceship en dergelijke
+                                 # aantrelling is computationeel zwaar en niet interessant voor gameplay 
             if planet is self:
                 continue  # Een object trekt zichzelf niet aan
             if self._is_planet and id(self) > id(planet):
@@ -177,7 +179,9 @@ class LineHitbox(Hitbox):
         # Een lijn met lengte 0 kan niets raken
         if self.pos == self.end: return False
         if other._is_line:
-            #currenlty unused, may be faulthy
+            '''
+            !!! this code is currently never used and may contain bugs !!!
+            '''
             # bounding box check first (cheap)
             if self.minx > other.maxx or self.maxx < other.minx:
                 return False
@@ -196,6 +200,7 @@ class LineHitbox(Hitbox):
                 return False  # parallel
             
             # Bereken de snijpuntparameters t en u
+            # gebaseerd op Cramer's regel
             t = cross2d(other.pos - self.pos, d2) / denom
             u = cross2d(other.pos - self.pos, d1) / denom
             # intersection happens at self.pos + d1 * t or other.pos + d2 * u
@@ -254,12 +259,13 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
      
          # Relative velocity along normal
          rel_vel = self.vel - other.vel
-         vel_along_normal = rel_vel.dot(normal)
+         vel_along_normal = rel_vel * normal
          
          if vel_along_normal < 0:
              return # objects are moving apart
         
          # Berekent de impuls op basis van de massa's en de relatieve snelheid
+         # dit is een resultaat gebaseerd op behoud van energie en impuls
          impulse = (2 * vel_along_normal) / (self.mass + other.mass)
          
          if damage_multiplier != 0:
