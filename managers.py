@@ -31,6 +31,8 @@ class ChunkManager:
             for element in self.all_chunks[chunk]:
                 g.active_object.add(element)
                 if element._is_planet: g.planets.add(element)
+                if element._is_enemy: g.enemies.add(element)
+                if element._is_bullet: g.bullets.add(element)
         except:
             if not debug_disable_world_gen:
                 self.generate_chunk(chunk)
@@ -65,8 +67,9 @@ class ChunkManager:
         random_pos = 500
         chunk_center += pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
         prefab = random.choice(list(all_prefabs.values()))
-        self.all_chunks[chunk] = prefab(chunk_center)
-        
+        planets = prefab(chunk_center)
+        self.all_chunks[chunk] = planets
+        self.set_active(chunk)
         delta = pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
         g.enemy_manager.spawn_seq(chunk_center+delta)
             
