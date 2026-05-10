@@ -5,8 +5,8 @@ Een 2D ruimteschietspel gebouwd met Pygame, waarbij je een ruimteschip bestuurt 
 ---
 **Auteurs**
 
-> Anton Bogaerts
-> Boris Peleman
+- Anton Bogaerts
+- Boris Peleman
 ---
 
 ## Vereisten
