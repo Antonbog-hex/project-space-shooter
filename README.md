@@ -18,8 +18,13 @@ Een 2D ruimteschietspel gebouwd met Pygame, waarbij je een ruimteschip bestuurt 
 
 ## Starten
 
+**Windows:**
 ```bash
 python main.py
+```
+**MacOS:**
+```bash
+python3 main.py
 ```
 
 ---
