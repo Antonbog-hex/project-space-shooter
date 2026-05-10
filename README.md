@@ -60,7 +60,7 @@ Je begint met het basiswapen. Door vijanden te verslaan kun je wapens oppikken d
 |---|---|---|---|
 | Basic | 1 | Snel | Standaard rood projectiel |
 | Sniper | 3 | Langzaam | Hoge snelheid, groot bereik |
-| Shotgun | 1 | Middel | 8 hagelkorrels per schot |
+| Shotgun | 1 | Middel | 8 kogels per schot |
 | Rocket | 2 + explosie | Zeer langzaam | Zelfgeleid, explodeert bij inslag |
 
 ---
