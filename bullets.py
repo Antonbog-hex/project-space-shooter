@@ -64,7 +64,7 @@ class SniperBullet(BaseBullet):
     texture = None
     mass = 4
     def __init__(self, pos, vel, source, **kwargs):
-        super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=self.__class__.radius,image=self.__class__.texture,**kwargs)
+        super().__init__(pos=pos, vel=vel,source = source,**kwargs)
 class RocketBullet(BaseBullet,RotatingObject):
     damage = 2
     speed = 300
@@ -78,10 +78,10 @@ class RocketBullet(BaseBullet,RotatingObject):
     moment_dampener = 0.05
     perp_correction_cutoff = 15
     min_approach_speed = 300
-    def __init__(self,pos,vel,source):
+    def __init__(self,pos,vel,source, **kwargs):
         self.current_heading = source.current_heading
         angle = - self.current_heading.as_polar()[1]
-        super().__init__(pos= pos,vel=vel,source=source , angle = angle)
+        super().__init__(pos= pos,vel=vel,source=source , angle = angle,**kwargs)
         self._is_rocket = True
         self.base_image = self.base_image.convert_alpha()
         self.base_image = pygame.transform.rotozoom(self.base_image, -90, 0.025)
@@ -113,5 +113,5 @@ class ShotgunPellet(BaseBullet):
     texture = None
     mass = 4 
     def __init__(self, pos, vel, source, **kwargs):
-        super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=self.__class__.radius,image=self.__class__.texture,**kwargs)
+        super().__init__(pos=pos, vel=vel,source=source,**kwargs)
 init_textures()  

@@ -5,8 +5,8 @@ from base_classes import PhysicsObject, RotatingObject,LineHitbox
 from rendering import VisualObject
 from physics import Predictor, Explosion
 from effects import TrailParticle
-
 from constants import fps,timestep,debug_enemy
+
 def signed_angle_to(v1, v2):
     cross = -(v1.x * v2.y - v1.y * v2.x)
     dot = v1.dot(v2)
@@ -70,7 +70,7 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         self.heal_animation()
     def shoot(self):
         if self.bullet_ticker > 0 : return
-        bullet = self.__class__.bullet_type(self.pos,self.vel + self.current_heading * self.__class__.bullet_type.speed,self)
+        bullet = self.__class__.bullet_type(pos = self.pos,vel= (self.vel + self.current_heading * self.__class__.bullet_type.speed),source = self)
         g.bullets.add(bullet)      
         self.bullet_ticker = self.__class__.bullet_reload         
     def resolve_collisions(self):
