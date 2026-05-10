@@ -154,18 +154,21 @@ class Camera(BasicObject):
             pygame.draw.rect(self.pre_screen, (0, 200, 0), hp_rect)
 
     def draw_player_hp(self, player):
-        # HP balk linksonder op het echte scherm
-        bar_w = 200
-        bar_h = 18
-        x = 15
-        y = self.final_screen.get_height() - 35
-        pygame.draw.rect(self.final_screen, (100, 0, 0), (x, y, bar_w, bar_h), border_radius=4)
-        fraction = max(0, player.hp / player.max_hp)
-        pygame.draw.rect(self.final_screen, (0, 180, 0), (x, y, int(bar_w * fraction), bar_h), border_radius=4) # health
-        fraction = max(0, player.shield / player.max_hp)
-        pygame.draw.rect(self.final_screen, (40, 183, 235), (x, y, int(bar_w * fraction), bar_h), border_radius=4) # shield
-        pygame.draw.rect(self.final_screen, (255, 255, 255),(x, y, bar_w, bar_h), width=1, border_radius=4)
-        
+            bar_w = 200
+            bar_h = 18
+            x = 15
+            y = self.final_screen.get_height() - 35
+            pygame.draw.rect(self.final_screen, (100, 0, 0), (x, y, bar_w, bar_h), border_radius=4)
+            fraction = max(0, player.hp / player.max_hp)
+            s = pygame.Surface((bar_w, bar_h), pygame.SRCALPHA)
+            pygame.draw.rect(s, (0, 180, 0), (0, 0, bar_w, bar_h), border_radius=4)
+            self.final_screen.blit(s, (x, y), area=pygame.Rect(0, 0, int(bar_w * fraction), bar_h))
+            fraction = max(0, player.shield / player.max_hp)
+            s = pygame.Surface((bar_w, bar_h), pygame.SRCALPHA)
+            pygame.draw.rect(s, (40, 183, 235), (0, 0, bar_w, bar_h), border_radius=4)
+            self.final_screen.blit(s, (x, y), area=pygame.Rect(0, 0, int(bar_w * fraction), bar_h))
+            pygame.draw.rect(self.final_screen, (255, 255, 255), (x, y, bar_w, bar_h), width=1, border_radius=4)
+            
     def finalise(self):
         # Schaal de pre_screen naar het echte venster en toon hem
         target_w = int(self.pre_screen.get_width() * self.scaler)

@@ -22,9 +22,9 @@ def reset_game():
     g.planets.reset()
     g.enemies.reset()
     g.particle_effects.reset()
-    g.chunkmanager  = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
+    g.chunkmanager = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
     g.enemy_manager = EnemyManager()
-    g.player        = Player(pos=(0, 0), vel=(0, 200), angle=0)
+    g.player = Player(pos=(0, 0), vel=(0, 200), angle=0)
     g.score_manager.reset()
     g.active_object.add(g.player)
     g.camera.pos = pygame.Vector2(0, 0)
@@ -53,7 +53,7 @@ def main():
         
         if g.menu.active:
             g.camera.background_draw()
-            g.camera.finalise()
+            g.camera.finalise() 
             g.menu.draw(high_score=g.score_manager.high_score, last_score=g.score_manager.score)
             pygame.display.update()
             clock.tick(fps)
@@ -84,7 +84,7 @@ def main():
             if debug_bullets: g.camera.debug_draw(g.bullets)
         g.camera.finalise()
         g.score_manager.draw(g.camera.final_screen)
-        g.camera.draw_player_hp(g.player)
+
         if not g.menu.active:
             g.camera.draw_player_hp(g.player)
         empty_bin(g.waste_bin)
