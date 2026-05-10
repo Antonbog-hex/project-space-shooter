@@ -80,7 +80,7 @@ class ChunkManager:
 class EnemyManager:
     min_spawn_dist = 3000
     max_spawn_dist = 8000
-    max_enemies = 30
+    max_enemies = 15
     spawn_ticks = 300 # number of ticks between enemy spawns at difficulty 1
     def __init__(self):
         self.all_enemies = all_enemy_types
