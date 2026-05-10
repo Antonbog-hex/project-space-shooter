@@ -52,7 +52,7 @@ class Player(Spaceship):
         if self.current_gun == 'Shotgun':
             for i in range(8):
                 aim = self.current_heading.rotate(random.uniform(-10, 10))
-                bullet = self.bullet_type(self.pos,self.vel + aim * self.__class__.bullet_type.speed * random.uniform(0.5,1),self)
+                bullet = self.bullet_type(self.pos, self.vel + aim * self.bullet_type.speed * random.uniform(0.5,1), self)
                 g.bullets.add(bullet) 
         else:
             bullet = self.bullet_type(self.pos,self.vel + self.current_heading * self.bullet_type.speed,self)
