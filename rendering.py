@@ -1,8 +1,7 @@
 import pygame
-from constants import *
-from base_classes import *
-from physics import *
-
+import constants as g
+from constants import true_width,debug_player,debug_bullets,debug_enemy,debug_planet
+from base_classes import BasicObject
 class Camera(BasicObject):
     # Beheert het scherm: achtergrond, objecten tekenen en vloeiend de speler volgen
     max_width = 5000 # the max width to zoom out to
@@ -100,16 +99,16 @@ class Camera(BasicObject):
                 if v.magnitude_squared() != 0: v=v.clamp_magnitude(800)
                 pygame.draw.line(self.pre_screen, 'orange', pos, pos+v)
             else: continue
-            if debug_bullets and isinstance(sprite,BaseBullet):
+            if debug_bullets and sprite._is_bullet:
                 pygame.draw.circle(self.pre_screen, 'red', pos, sprite.hitbox_radius,width = 1)
-                if isinstance(sprite,RocketBullet): pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 100)
+                if sprite._is_rocket: pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 100)
             if sprite._is_target:
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
             if sprite._is_enemy and debug_enemy:
                 pygame.draw.line(self.pre_screen,'white',pos,pos + sprite.current_heading * 800)
                 pygame.draw.circle(self.pre_screen, 'green', pos, sprite.hitbox_radius,width = 1)
                 if sprite.desired_heading != None:
-                    pygame.draw.line(camera.pre_screen, 'purple', pos, pos + sprite.desired_heading.normalize() * 100)
+                    pygame.draw.line(g.camera.pre_screen, 'purple', pos, pos + sprite.desired_heading.normalize() * 100)
                 if sprite.aim_target != None:
                     target = sprite.aim_target - self.pos + self.offset
                     pygame.draw.circle(self.pre_screen, 'magenta', target , 5)
@@ -123,9 +122,9 @@ class Camera(BasicObject):
         for prediction in player.position_estimation:
             pygame.draw.circle(self.pre_screen, 'white', prediction - self.pos + self.offset , 4)
         '''
-        if self.prev_pos == None: self.prev_pos = player.position_estimation
+        if self.prev_pos == None: self.prev_pos = g.player.position_estimation
         new_pos_l = []
-        for i, pos in enumerate(player.position_estimation):
+        for i, pos in enumerate(g.player.position_estimation):
             prev_pos = self.prev_pos[i]
             new_pos = prev_pos + (pos - prev_pos)*0.1
             new_pos_l.append(new_pos)
@@ -192,3 +191,79 @@ class Camera(BasicObject):
             self.zoom(self.zoom_level + 0.01)
         if keys[pygame.K_e]:
             self.zoom(self.zoom_level - 0.01)
+
+class VisualObject(BasicObject):
+# Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
+    heal_animation_length = 80
+    def __init__(self, image: pygame.Surface, **kwargs):
+            if isinstance(image, str):
+                image = pygame.image.load(image).convert_alpha()
+            super().__init__(**kwargs)
+            self._is_visual = True
+            self.image = image
+            self.base_image = self.image  # bewaar origineel voor rotaties
+            self.animation_state = None
+            self.animation_ticker = 0
+            self.ticker_start = 0
+    def get_frame_pos(self) -> pygame.Vector2:
+        offset = pygame.math.Vector2(self.image.get_width() // 2, self.image.get_height() // 2)
+        return self.pos - offset
+    def animate(self):
+        if self.animation_state == 'healing':
+            progress = (self.ticker_start - self.animation_ticker)/self.ticker_start
+            self.image = self.pulse_animation_frame(self.image, progress, (99, 245, 66))
+            return
+        if self.animation_state == 'charge_up':
+            progress = self.animation_ticker/self.__class__.heal_animation_length
+            self.image = self.pulse_animation_frame(self.image, progress , self.__class__.theme_colour)
+            return
+        if self.animation_state == 'shield':
+            progress = (self.ticker_start - self.animation_ticker)/self.ticker_start
+            self.image = self.pulse_animation_frame(self.image, progress, (40, 79, 235))
+            return
+    def heal_animation(self):
+        self.animation_ticker = self.__class__.heal_animation_length
+        self.ticker_start = self.animation_ticker
+        self.animation_state = 'healing'
+    def charge_up_animation(self,length):
+        self.animation_ticker = length
+        self.ticker_start = self.animation_ticker
+        self.animation_state = 'charge_up'
+    def shield_animation(self,length):
+        self.animation_ticker = length
+        self.ticker_start = self.animation_ticker
+        self.animation_state = 'shield'
+    def update(self):
+        if self.animation_ticker > 0:
+            self.animate()
+            self.animation_ticker -= 1
+        super().update()
+    def pulse_animation_frame(self, base_image, progress, colour):
+            w, h = base_image.get_size()
+            cx, cy = w // 2, h // 2
+            
+            # Radii and Alpha based on 0.0 -> 1.0 progress
+            outer_radius = int(progress * max(w, h))
+            inner_radius = max(0, outer_radius - 10)
+            alpha = int(255 * (1 - progress))
+            
+            if outer_radius <= 0:
+                return base_image.copy()
+    
+            # Create a temp surface for the ring
+            donut = pygame.Surface((w, h), pygame.SRCALPHA)
+            pygame.draw.circle(donut, (255,255,255, alpha/ 2), (cx, cy), outer_radius)
+            pygame.draw.circle(donut, (*colour, alpha), (cx, cy), outer_radius)
+            if inner_radius > 0:
+                # Cut the center out
+                pygame.draw.circle(donut, (0, 0, 0, 0), (cx, cy), inner_radius)
+            
+            # MASKING: Only show the donut where the base_image is visible
+            # We blit the base_image onto the donut using BLEND_RGBA_MULT
+            mask = base_image.copy()
+            donut.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            
+            # Combine with original
+            result = base_image.copy()
+            result.blit(donut, (0, 0),special_flags=pygame.BLEND_RGB_ADD)
+            return result

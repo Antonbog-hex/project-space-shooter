@@ -1,11 +1,12 @@
 import pygame
 import random
-from constants import *
-from base_classes import *
-from physics import *
-from spaceships import *
-from planets import *
-from items import *
+import constants as g
+from constants import debug_disable_world_gen,debug_disable_enemy_spawn
+from base_classes import PhysicsObject
+from physics import Predictor
+from spaceships import all_enemy_types, Spaceship
+from planets import all_prefabs
+
 
 class ChunkManager:
     def __init__(self,chunk_size = (2000,2000),around_chunks = 1):
@@ -27,8 +28,8 @@ class ChunkManager:
         self.active_chunks.add(chunk)
         try:
             for element in self.all_chunks[chunk]:
-                active_object.add(element)
-                if element._is_planet: planets.add(element)
+                g.active_object.add(element)
+                if element._is_planet: g.planets.add(element)
         except:
             if not debug_disable_world_gen:
                 self.generate_chunk(chunk)
@@ -66,10 +67,10 @@ class ChunkManager:
         self.all_chunks[chunk] = prefab(chunk_center)
         
         delta = pygame.Vector2(random.uniform(-random_pos, random_pos),random.uniform(-random_pos, random_pos))
-        enemy_manager.spawn_seq(chunk_center+delta)
+        g.enemy_manager.spawn_seq(chunk_center+delta)
             
     def update(self):
-        self.central_chunk = self.get_chunk(player.pos)
+        self.central_chunk = self.get_chunk(g.player.pos)
         self.active_chunk_update()
         self.calculate_safezone()
 class EnemyManager:
@@ -85,8 +86,8 @@ class EnemyManager:
     def spawn_enemy(self,enemy_type,pos):
         if debug_disable_enemy_spawn: return
         enemy = enemy_type(pos)
-        active_object.add(enemy)
-        enemies.add(enemy)
+        g.active_object.add(enemy)
+        g.enemies.add(enemy)
     def get_enemy_type(self):
         return random.choices(self.all_enemies, weights=self.weights, k=1)[0]
     def find_spot(self,pos:pygame.Vector2, min_dist = None, max_dist =None):
@@ -100,7 +101,7 @@ class EnemyManager:
         for i in range(5):
             tester.pre_update()
             f = tester.force
-            if f.magnitude_squared() < 2000 ** 2 and (pos-player.pos).magnitude_squared() > self.__class__.min_spawn_dist ** 2:
+            if f.magnitude_squared() < 2000 ** 2 and (pos-g.player.pos).magnitude_squared() > self.__class__.min_spawn_dist ** 2:
                 return pos
             f += pygame.Vector2(0.1,0.1)
             tester.pos -= 10* f / (f*f) ** 0.25
@@ -112,15 +113,15 @@ class EnemyManager:
         if pos == None: return
         self.spawn_enemy(enemy_type, pos)
     def update(self):
-        if len(enemies) >= self.__class__.max_enemies: return
+        if len(g.enemies) >= self.__class__.max_enemies: return
         if self.spawn_ticker <= 0:
-            self.spawn_seq(player.pos)
+            self.spawn_seq(g.player.pos)
             self.spawn_ticker = self.__class__.spawn_ticks
         else:
             self.spawn_ticker -= self.difficulty_score
         if random.randint(0,7200) < self.difficulty_score:
-            for enemy in enemies:
-                enemy.player_memory = enemy.__class__.player_max_memory
+            for enemy in g.enemies:
+                enemy.g.player_memory = enemy.__class__.g.player_max_memory
 class ScoreManager:
     def __init__(self):
         self.score = 0
@@ -132,7 +133,7 @@ class ScoreManager:
         self.score += amount
         if self.score > self.high_score:
             self.high_score = self.score
-        enemy_manager.difficulty_score = self.score // 100 + 1
+        g.enemy_manager.difficulty_score = self.score // 100 + 1
 
     def reset(self):
         self.score = 0
@@ -174,3 +175,24 @@ class Menu:
         self.screen.blit(score_line, score_line.get_rect(center=(center_x, center_y - 30)))
         self.screen.blit(hi_line, hi_line.get_rect(center=(center_x, center_y + 20)))
         self.screen.blit(prompt, prompt.get_rect(center=(center_x, center_y + 100)))
+class ActiveObjects(list):
+    # Lijst van alle actieve PhysicsObjects. Roept elke frame pre_update() en update() aan op elk object.
+
+    def __init__(self):
+        super().__init__()
+        self._pending_add = []
+    def resolve_pending_add(self):
+        for obj in self._pending_add:
+            self.append(obj)
+        self._pending_add.clear()
+    def add(self,other:PhysicsObject):
+        self._pending_add.append(other)
+    def reset(self):
+        self._pending_add.clear()
+        self.clear()
+    def update(self):
+        for e in self:
+            e.pre_update() # calculates without action (eg. gravity)
+        for e in self:
+            e.update() # the action (eg. movement)
+        self.resolve_pending_add()

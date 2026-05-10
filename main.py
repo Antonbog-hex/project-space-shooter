@@ -1,82 +1,40 @@
 import pygame
-import random
-import math
 import traceback
-from constants import *
-from base_classes import *
-from physics import *
-from effects import *
-from bullets import *
-from spaceships import *
-from planets import *
-from items import *
-from managers import *
-
-class DebugMass(PhysicsObject,VisualObject):
-    def __init__(self):
-        image = pygame.Surface((20,20))
-        pygame.draw.circle(image,'red',(10,10),10)
-        super().__init__((50,50),mass = 300,image=image .convert_alpha())
-    def update(self):
-        if pygame.mouse.get_pressed()[0]:
-            self.mass = 1000
-            mouse_screen = pygame.Vector2(pygame.mouse.get_pos())
-            mouse_pre = mouse_screen / camera.scaler
-            mouse_world = mouse_pre - camera.offset + camera.pos
-            self.pos = mouse_world
-            self.vel = pygame.Vector2(0)
-        else:
-            self.mass = 0.01
-            self.vel = pygame.Vector2(0)
-        super().update()
-
-class Target(PhysicsObject, VisualObject):
-    def __init__(self, pos, vel=(0, 0), size=1.0):
-        pixel_size = int(60 * size)   
-        hitbox = int(30 * size)
-        target_surface = pygame.Surface((pixel_size, pixel_size), pygame.SRCALPHA)
-        pygame.draw.rect(target_surface, (220, 50, 50), (0, 0, pixel_size, pixel_size), border_radius=6)
-        pygame.draw.rect(target_surface, (255, 100, 100), (0, 0, pixel_size, pixel_size), width=2, border_radius=6)
-        super().__init__(pos=pos, vel=vel, mass=10, hitbox_radius=hitbox, image=target_surface)
-    
-    def update(self):
-        super().update()
-
-def signed_angle_to(v1, v2):
-    cross = -(v1.x * v2.y - v1.y * v2.x)
-    dot = v1.dot(v2)
-    return math.degrees(math.atan2(cross, dot))
+import gamestate as g
+from rendering import Camera
+from player import Player
+from managers import ActiveObjects, ChunkManager, EnemyManager, ScoreManager, Menu
 
 def empty_bin(waste_bin):
     for obj in waste_bin:
-        try: active_object.remove(obj)
+        try: g.d.remove(obj)
         except: pass
-        try: bullets.remove(obj)
+        try: g.bullets.remove(obj)
         except: pass
-        try: planets.remove(obj)
+        try: g.planets.remove(obj)
         except: pass
-        try: enemies.remove(obj)
+        try: g.enemies.remove(obj)
         except: pass
-        try: particle_effects.remove(obj)
+        try: g.particle_effects.remove(obj)
         except: pass
-    waste_bin.clear()
+    g.waste_bin.clear()
 
 def reset_game():
-    global player, active_object, bullets, planets, enemies, chunkmanager, enemy_manager
-    active_object.clear()
-    bullets.reset()
-    planets.reset()
-    enemies.reset()
-    particle_effects.reset()
-    chunkmanager  = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
-    enemy_manager = EnemyManager()
-    player        = Player(pos=(0, 0), vel=(0, 200), angle=0)
-    score_manager.reset()
-    active_object.add(player)
-    active_object.add(debug_mass)
-    camera.pos = pygame.Vector2(0, 0)
-    camera.zoom(1.0)
-    camera.prev_pos = None
+    #global g.player, g.active_object, bullets, planets, enemies, chunkmanager, enemy_manager
+    g.active_object.clear()
+    g.bullets.reset()
+    g.planets.reset()
+    g.enemies.reset()
+    g.particle_effects.reset()
+    g.chunkmanager  = ChunkManager(around_chunks=1, chunk_size=(5000, 5000))
+    g.enemy_manager = EnemyManager()
+    g.player        = Player(pos=(0, 0), vel=(0, 200), angle=0)
+    g.score_manager.reset()
+    g.active_object.add(g.player)
+    g.camera.pos = pygame.Vector2(0, 0)
+    g.camera.zoom(1.0)
+    g.camera.prev_pos = None
+
 
 def main():
     while True:
@@ -86,81 +44,79 @@ def main():
                 raise SystemExit
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    if menu.active:
+                    if g.menu.active:
                         pygame.quit()
                         raise SystemExit
                     else:
-                        menu.active = True
-                        menu.is_death_screen = False
+                        g.menu.active = True
+                        g.menu.is_death_screen = False
                 if event.key == pygame.K_RETURN:
-                    if menu.active:
-                        menu.active = False
+                    if g.menu.active:
+                        g.menu.active = False
                         reset_game()
 
-        if menu.active:
-            camera.background_draw()
-            camera.finalise()
-            menu.draw(high_score=score_manager.high_score, last_score=score_manager.score)
+        if g.menu.active:
+            g.camera.background_draw()
+            g.camera.finalise()
+            g.menu.draw(high_score=g.score_manager.high_score, last_score=g.score_manager.score)
             pygame.display.update()
-            clock.tick(fps)
+            clock.tick(g.fps)
             continue
         
-        chunkmanager.update()
-        enemy_manager.update()
-        active_object.update()
-        bullets.update()
-        enemies.resolve_pending_add()
-        planets.resolve_pending_add()
-        particle_effects.update()
+        g.chunkmanager.update()
+        g.enemy_manager.update()
+        g.active_object.update()
+        g.bullets.update()
+        g.enemies.resolve_pending_add()
+        g.planets.resolve_pending_add()
+        g.particle_effects.update()
         
-        if debug_freecam:
-            camera.freecam()
-            player.pos = camera.pos
+        if g.debug_freecam:
+            g.camera.freecam()
+            g.player.pos = g.camera.pos
         else:
-            camera.track(player)
+            g.camera.track(g.player)
     
-        camera.background_draw()
-        camera.draw(particle_effects)
-        camera.draw(active_object)
-        camera.draw(bullets)
-        camera.draw_enemy_healthbar(enemies)
-        camera.player_predict_draw()
-        if debug:
-            camera.debug_draw(active_object)
-            if debug_bullets: camera.debug_draw(bullets)
-        camera.finalise()
-        score_manager.draw(camera.final_screen)
-        camera.draw_player_hp(player)
-        if not menu.active:
-            camera.draw_player_hp(player)
-        empty_bin(waste_bin)
+        g.camera.background_draw()
+        g.camera.draw(g.particle_effects)
+        g.camera.draw(g.active_object)
+        g.camera.draw(g.bullets)
+        g.camera.draw_enemy_healthbar(g.enemies)
+        g.camera.player_predict_draw()
+        if g.debug:
+            g.camera.debug_draw(g.active_object)
+            if g.debug_bullets: g.camera.debug_draw(g.bullets)
+        g.camera.finalise()
+        g.score_manager.draw(g.camera.final_screen)
+        g.camera.draw_player_hp(g.player)
+        if not g.menu.active:
+            g.camera.draw_player_hp(g.player)
+        empty_bin(g.waste_bin)
         pygame.display.update()
-        clock.tick(fps)
+        clock.tick(g.fps)
 
 pygame.init()
 try:
-    init_textures()
+    #init_textures()
 
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)
     height = int(info.current_h * 0.9)
 
     screen = pygame.display.set_mode((width, height), pygame.SCALED)
-    screen_rect = screen.get_rect()
 
-    player = Player(pos=(0,0), vel=(0,200), angle=0)
-    camera = Camera(screen)
+    g.player = Player(pos=(0,0), vel=(0,200), angle=0)
+    g.camera = Camera(screen)
     clock = pygame.time.Clock()
-    active_object = ActiveObjects()
-    bullets = ActiveObjects()
-    planets = ActiveObjects()
-    enemies = ActiveObjects()
-    particle_effects = ActiveObjects()
-    chunkmanager = ChunkManager(around_chunks=1, chunk_size=(5000,5000))
-    enemy_manager = EnemyManager()
-    score_manager = ScoreManager()
-    menu = Menu(screen)
-    debug_mass = DebugMass()
+    g.active_object = ActiveObjects()
+    g.bullets = ActiveObjects()
+    g.planets = ActiveObjects()
+    g.enemies = ActiveObjects()
+    g.particle_effects = ActiveObjects()
+    g.chunkmanager = ChunkManager(around_chunks=1, chunk_size=(5000,5000))
+    g.enemy_manager = EnemyManager()
+    g.score_manager = ScoreManager()
+    g.menu = Menu(screen)
     main()
 
 except SystemExit:

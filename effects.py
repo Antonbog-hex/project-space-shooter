@@ -1,10 +1,8 @@
 import pygame
-from constants import *
-from base_classes import *
-from physics import *
+from rendering import VisualObject
 
 class ParticleEffect(VisualObject):
-    image = None
+    image = pygame.Surface((10,10))
     def __init__(self, pos,duration = 10):
         super().__init__(pos = pos, image= self.__class__.image)
         self.ticker = duration
@@ -15,6 +13,7 @@ class ParticleEffect(VisualObject):
         self.update_image()
         self.ticker -= 1
         if self.ticker <= 0: self.kys()
+    
 class ExplosionEffect(ParticleEffect):
     def __init__(self, pos, radius=30, duration = 60):
         self.radius = radius
@@ -48,19 +47,5 @@ class TrailParticle(ParticleEffect):
         size = current_radius * 2
         self.image = pygame.Surface((size, size), pygame.SRCALPHA)
         pygame.draw.circle(self.image, (*self.color, alpha), (current_radius, current_radius), current_radius)   
-class Explosion(CircularHitbox):
-    damage = 3
-    def __init__(self,pos,radius,duration):
-        self.duration = duration
-        super().__init__(pos=pos,radius  = radius)
-        self.hit_list = []
-        particle_effects.add(ExplosionEffect(self.pos,self.hitbox_radius,self.duration))
-    def update(self):
-        for element in enemies + [player]:
-            if (not element in self.hit_list) and self.hit(element):
-                self.hit_list.append(element)
-                element.take_damage(self.__class__.damage)
-                element.vel += 1000 * (element.pos - self.pos) / element.mass
-        self.duration -= 1
-        if self.duration <= 0: self.kys()
+
 

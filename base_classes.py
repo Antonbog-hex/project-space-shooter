@@ -1,7 +1,7 @@
 import pygame
-import math
 import random
-from constants import *
+import constants as  g # variabel
+from constants import timestep,grav_cte, debug_world_gen # constant
 
 class BasicObject(): 
 
@@ -9,90 +9,17 @@ class BasicObject():
 
     def __init__(self,pos: pygame.Vector2 = 0):
         self.pos = pygame.math.Vector2(pos)
-        self._is_moving = isinstance(self, MovingObject)
-        self._is_visual = isinstance(self, VisualObject)
-        self._is_physics  = isinstance(self,PhysicsObject)
+        self._is_moving = False
+        self._is_visual = False
+        self._is_physics  = False
     def update(self):
         pass # Lege methode, zodat super().update() altijd werkt
 
     def pre_update(self):
         pass # idem, deze methode wordt aangeroepen voor update()
     def kys(self):
-        waste_bin.append(self)         
-class VisualObject(BasicObject):
-# Object met zichtbare afbeelding, erft van BasicObject() -> heeft pos + image
-    heal_animation_length = 80
-    def __init__(self, image: pygame.Surface, **kwargs):
-            if isinstance(image, str):
-                image = pygame.image.load(image).convert_alpha()
-            super().__init__(**kwargs)
-            self.image = image
-            self.base_image = self.image  # bewaar origineel voor rotaties
-            self.animation_state = None
-            self.animation_ticker = 0
-            self.ticker_start = 0
-    def get_frame_pos(self) -> pygame.Vector2:
-        offset = pygame.math.Vector2(self.image.get_width() // 2, self.image.get_height() // 2)
-        return self.pos - offset
-    def animate(self):
-        if self.animation_state == 'healing':
-            progress = (self.ticker_start - self.animation_ticker)/self.ticker_start
-            self.image = self.pulse_animation_frame(self.image, progress, (99, 245, 66))
-            return
-        if self.animation_state == 'charge_up':
-            progress = self.animation_ticker/self.__class__.heal_animation_length
-            self.image = self.pulse_animation_frame(self.image, progress , self.__class__.theme_colour)
-            return
-        if self.animation_state == 'shield':
-            progress = (self.ticker_start - self.animation_ticker)/self.ticker_start
-            self.image = self.pulse_animation_frame(self.image, progress, (40, 79, 235))
-            return
-    def heal_animation(self):
-        self.animation_ticker = self.__class__.heal_animation_length
-        self.ticker_start = self.animation_ticker
-        self.animation_state = 'healing'
-    def charge_up_animation(self,length):
-        self.animation_ticker = length
-        self.ticker_start = self.animation_ticker
-        self.animation_state = 'charge_up'
-    def shield_animation(self,length):
-        self.animation_ticker = length
-        self.ticker_start = self.animation_ticker
-        self.animation_state = 'shield'
-    def update(self):
-        if self.animation_ticker > 0:
-            self.animate()
-            self.animation_ticker -= 1
-        super().update()
-    def pulse_animation_frame(self, base_image, progress, colour):
-            w, h = base_image.get_size()
-            cx, cy = w // 2, h // 2
-            
-            # Radii and Alpha based on 0.0 -> 1.0 progress
-            outer_radius = int(progress * max(w, h))
-            inner_radius = max(0, outer_radius - 10)
-            alpha = int(255 * (1 - progress))
-            
-            if outer_radius <= 0:
-                return base_image.copy()
-    
-            # Create a temp surface for the ring
-            donut = pygame.Surface((w, h), pygame.SRCALPHA)
-            pygame.draw.circle(donut, (255,255,255, alpha/ 2), (cx, cy), outer_radius)
-            pygame.draw.circle(donut, (*colour, alpha), (cx, cy), outer_radius)
-            if inner_radius > 0:
-                # Cut the center out
-                pygame.draw.circle(donut, (0, 0, 0, 0), (cx, cy), inner_radius)
-            
-            # MASKING: Only show the donut where the base_image is visible
-            # We blit the base_image onto the donut using BLEND_RGBA_MULT
-            mask = base_image.copy()
-            donut.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-            
-            # Combine with original
-            result = base_image.copy()
-            result.blit(donut, (0, 0),special_flags=pygame.BLEND_RGB_ADD)
-            return result
+        g.waste_bin.append(self)         
+
 class MovingObject(BasicObject):
     """
     Een object dat beweegt via physics:
@@ -106,6 +33,7 @@ class MovingObject(BasicObject):
         super().__init__(**kwargs)
         self.vel = pygame.Vector2(vel)
         self.acc = pygame.Vector2(acc)
+        self._is_moving = True
 
     def next_pos(self,steps = 1):
         # Berekent de positie na "steps" (kinematica)
@@ -129,9 +57,8 @@ class GravityObject(BasicObject):
         super().__init__(**kwargs)
         self.mass = mass
         self.grav_calc_ticker = random.randint(0,self.__class__.grav_ticker)
-        if isinstance(self, Planet): self.reaction_f = pygame.Vector2(0) # this is a var used to lower grav calc using action-reaction principle
-        if isinstance(self, MovingObject):
-            self.force = pygame.Vector2(0)
+        self.reaction_f = pygame.Vector2(0) # this is a var used to lower grav calc using action-reaction principle
+        self.force = pygame.Vector2(0)
 
     def get_grav(self, other: "GravityObject"):
         # Berekent de zwaartekrachtsvector
@@ -164,7 +91,7 @@ class GravityObject(BasicObject):
         else:
             force = pygame.Vector2(0)
         
-        for planet in planets: #planets is a global, changed from active_objects to improve performance
+        for planet in g.planets: #planets is a global, changed from active_objects to improve performance
             if planet is self:
                 continue
             if self._is_planet and id(self) > id(planet):
@@ -275,14 +202,15 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
     # Combineert zwaartekracht + beweging + botsingsdetectie. Dit is de basis voor planeten en spaceships.
     def __init__(self, pos,vel = 0, force = 0, mass = 20, hitbox_radius = 20, **kwargs):
         super().__init__(pos=pos,vel=vel, mass=mass, radius = hitbox_radius, **kwargs)
-        self._is_planet = isinstance(self, Planet)
-        self._is_spaceship = isinstance(self, Spaceship)
-        self._is_enemy = isinstance(self, BaseEnemy)
-        self._is_bullet = isinstance(self, BaseBullet)
-        self._is_predictor = isinstance(self, Predictor)
-        self._is_target = isinstance(self, Target)
-        self._is_player = isinstance(self, Player)
-        self._is_item = isinstance(self, Item)
+        self._is_physics = True
+        self._is_planet = False
+        self._is_spaceship = False
+        self._is_enemy = False
+        self._is_bullet = False
+        self._is_predictor = False
+        self._is_target = False
+        self._is_player = False
+        self._is_item = False
     def elastic_collision(self, other,energy_dis = 1, reflective = True , damage_multiplier = 0):
          """
         Verwerkt een elastische botsing tussen dit object en "other".
@@ -324,9 +252,9 @@ class PhysicsObject(GravityObject,MovingObject,CircularHitbox):
              other.pos -= normal*0.51*overlap
         
     def pre_update(self):
-        if not chunkmanager.in_safezone(self.pos):
+        if not g.chunkmanager.in_safezone(self.pos):
             try:
-                chunkmanager.all_chunks[chunkmanager.get_chunk(self.pos)].append(self)
+                g.chunkmanager.all_chunks[g.chunkmanager.get_chunk(self.pos)].append(self)
                 if debug_world_gen and not self._is_predictor:
                     print(f'unloaded{self}')
             except:
