@@ -398,8 +398,9 @@ class BaseEnemy(Spaceship):
     
             if effective_speed <= 0:
                 return target.pos
-    
+            
             travel_time = dist / effective_speed
+            #interpolatie tussen 2 predicted pos van de speler
             target_decimal_index = travel_time * fps / Spaceship.pos_estim_step_size
             delta = target_decimal_index - math.floor(target_decimal_index)
             floor_index = int(math.floor(target_decimal_index))

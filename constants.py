@@ -13,8 +13,8 @@ debug_disable_world_gen = False
 debug_world_gen = False
 debug_enemy = False
 debug_disable_enemy_spawn = False
-debug_bullets = True
-debug_item = True
+debug_bullets = False
+debug_item = False
 # theme colours
 simple_theme_colour = (199, 59, 28)
 sniper_theme_colour = (212, 178, 53)

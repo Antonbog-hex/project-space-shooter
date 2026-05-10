@@ -151,7 +151,7 @@ In de broncode (onderaan het bestand) staan verschillende flags die je kunt insc
 |---|---|
 | `debug` | Toont snelheids- en versnellingsvectoren |
 | `debug_enemy` | Toont gezichtslijn, hitbox en gewenste koers van vijanden |
-| `debug_freecam` | Camera los van de speler, bestuurbaar met WASD |
+| `debug_freecam` | Camera los van de speler, bestuurbaar met WASD, Q,E voor zoom (handig om world gen te inspecteren) |
 | `debug_bullets` | Toont hitboxen van kogels |
 | `debug_disable_world_gen` | Genereert geen nieuwe chunks |
 | `debug_disable_enemy_spawn` | Spawnt geen vijanden |

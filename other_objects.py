@@ -15,7 +15,7 @@ class Predictor(PhysicsObject):
     
     def update(self):
         for obj in g.active_object:
-            if self.hit(obj) and obj._is_physics and obj._is_item:
+            if self.hit(obj) and obj._is_physics and  obj._is_planet:
                 self.elastic_collision(obj,energy_dis=1.1,reflective=False)
         super().update()
 class Explosion(CircularHitbox):
