@@ -19,6 +19,7 @@ def init_textures():
     pygame.draw.circle(ShotgunPellet.texture, (48, 43, 186), (r, r), r)
 
     RocketBullet.texture = pygame.image.load('graphics/enemies/5.png')
+
 class BaseBullet(PhysicsObject, VisualObject):
 # Een kogel die het schip afvuurt.
     damage = 1
@@ -113,4 +114,4 @@ class ShotgunPellet(BaseBullet):
     mass = 4 
     def __init__(self, pos, vel, source, **kwargs):
         super().__init__(pos=pos, vel=vel, mass=self.__class__.mass, hitbox_radius=self.__class__.radius,image=self.__class__.texture,**kwargs)
-        
+init_textures()  

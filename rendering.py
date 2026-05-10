@@ -1,5 +1,5 @@
 import pygame
-import constants as g
+import gamestate as g
 from constants import true_width,debug_player,debug_bullets,debug_enemy,debug_planet
 from base_classes import BasicObject
 class Camera(BasicObject):

@@ -1,7 +1,7 @@
 import pygame
 import random
 import gamestate as g
-from space_shooter import Spaceship
+from spaceships import Spaceship
 from constants import player_theme_colour, debug_freecam
 from bullets import ShotgunPellet,BaseBullet,SniperBullet,RocketBullet
 class Player(Spaceship):

@@ -3,7 +3,7 @@ import traceback
 import random
 import math
 
-
+raise Exception()
 # Klassen
 # %% basic classes
 class BasicObject(): 

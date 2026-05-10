@@ -5,15 +5,15 @@ grav_cte = 6000
 true_width = 3000
 
 # debug
-debug = False
+debug = True
 debug_player = True
-debug_planet = False
+debug_planet = True
 debug_freecam = False
 debug_disable_world_gen = False
-debug_world_gen = False
-debug_enemy = False
+debug_world_gen = True
+debug_enemy = True
 debug_disable_enemy_spawn = False
-debug_bullets = False
+debug_bullets = True
 # theme colours
 simple_theme_colour = (199, 59, 28)
 sniper_theme_colour = (212, 178, 53)

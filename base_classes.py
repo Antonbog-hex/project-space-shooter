@@ -1,6 +1,6 @@
 import pygame
 import random
-import constants as  g # variabel
+import gamestate as  g 
 from constants import timestep,grav_cte, debug_world_gen # constant
 
 class BasicObject(): 
@@ -62,7 +62,10 @@ class GravityObject(BasicObject):
 
     def get_grav(self, other: "GravityObject"):
         # Berekent de zwaartekrachtsvector
-        if self._is_bullet and self.source == other: return (0,0)
+        if self._is_physics:
+            if self._is_bullet and self.source == other: return (0,0)
+            if self._is_predictor and self.source == other: return (0,0)
+        
         if self.pos == other.pos or not self._is_moving:
             return
         diff = other.pos - self.pos

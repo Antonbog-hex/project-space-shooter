@@ -1,5 +1,6 @@
 import pygame
 import gamestate as g
+import math
 from base_classes import PhysicsObject, RotatingObject,LineHitbox
 from rendering import VisualObject
 from physics import Predictor, Explosion
@@ -39,16 +40,15 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         
     def pos_estimation_update(self,steps=5):
         # Simuleert de toekomstige baan door een kopie van het schip vooruit te bewegen zonder het echte schip aan te passen.
-        g.active_object.remove(self)
+        
         self.position_estimation.clear()
-        tester = Predictor(pos = self.pos,vel= self.vel,force = self.force,mass=self.mass,hitbox_radius= self.hitbox_radius)
+        tester = Predictor(pos = self.pos,vel= self.vel,force = self.force,mass=self.mass,hitbox_radius= self.hitbox_radius, source= self)
         for i in range(steps):
             for i in range (__class__.pos_estim_step_size):
                 tester.pre_update()
                 tester.update()
             self.position_estimation.append(tester.pos)
         
-        g.active_object.add(self)
     def take_damage(self, amount=1):
         self.shield_regen_ticker = 750
         if self.shield > 0:

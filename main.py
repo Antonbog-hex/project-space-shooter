@@ -1,12 +1,15 @@
 import pygame
 import traceback
 import gamestate as g
-from constants import fps, debug_freecam
+from constants import fps, debug_freecam,debug,debug_bullets
 from rendering import Camera
 from player import Player
 from managers import ActiveObjects, ChunkManager, EnemyManager, ScoreManager, Menu
-containers = [g.active_object,g.bullets,g.enemies,g.particle_effects]
+
+
 def empty_bin(waste_bin):
+    
+    containers = [g.active_object,g.planets,g.bullets,g.enemies,g.particle_effects]
     for obj in waste_bin:
         for container in containers:
             if obj in container: container.remove(obj)
@@ -14,7 +17,7 @@ def empty_bin(waste_bin):
 
 def reset_game():
     #global g.player, g.active_object, bullets, planets, enemies, chunkmanager, enemy_manager
-    g.active_object.clear()
+    g.active_object.reset()
     g.bullets.reset()
     g.planets.reset()
     g.enemies.reset()
@@ -47,7 +50,7 @@ def main():
                     if g.menu.active:
                         g.menu.active = False
                         reset_game()
-
+        
         if g.menu.active:
             g.camera.background_draw()
             g.camera.finalise()
@@ -55,15 +58,14 @@ def main():
             pygame.display.update()
             clock.tick(fps)
             continue
-        
+
         g.chunkmanager.update()
         g.enemy_manager.update()
         g.active_object.update()
         g.bullets.update()
+        g.particle_effects.update()
         g.enemies.resolve_pending_add()
         g.planets.resolve_pending_add()
-        g.particle_effects.update()
-        
         if debug_freecam:
             g.camera.freecam()
             g.player.pos = g.camera.pos
@@ -76,9 +78,10 @@ def main():
         g.camera.draw(g.bullets)
         g.camera.draw_enemy_healthbar(g.enemies)
         g.camera.player_predict_draw()
-        if g.debug:
+        
+        if debug:
             g.camera.debug_draw(g.active_object)
-            if g.debug_bullets: g.camera.debug_draw(g.bullets)
+            if debug_bullets: g.camera.debug_draw(g.bullets)
         g.camera.finalise()
         g.score_manager.draw(g.camera.final_screen)
         g.camera.draw_player_hp(g.player)
@@ -90,8 +93,6 @@ def main():
 
 pygame.init()
 try:
-    #init_textures()
-
     info = pygame.display.Info()
     width = int(info.current_w * 0.9)
     height = int(info.current_h * 0.9)

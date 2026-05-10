@@ -1,6 +1,6 @@
 import pygame
 import random
-import constants as g
+import gamestate as g
 from constants import grav_cte
 from base_classes import PhysicsObject
 from rendering import VisualObject

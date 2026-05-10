@@ -122,7 +122,7 @@ class EnemyManager:
             self.spawn_ticker -= self.difficulty_score
         if random.randint(0,7200) < self.difficulty_score:
             for enemy in g.enemies:
-                enemy.g.player_memory = enemy.__class__.g.player_max_memory
+                enemy.player_memory = enemy.__class__.player_max_memory
 class ScoreManager:
     def __init__(self):
         self.score = 0

@@ -1,11 +1,15 @@
 import pygame
-import constants as g
+import gamestate as g
 from base_classes import PhysicsObject,GravityObject
 from rendering import VisualObject
 from base_classes import CircularHitbox
 from effects import ExplosionEffect
 class Predictor(PhysicsObject):
     grav_ticker = 1
+    def __init__(self, pos,source=None,**kwargs):
+        self.source = source
+        super().__init__(pos = pos, **kwargs)
+        self._is_predictor = True
     def pre_update(self):
         GravityObject.pre_update(self)
     
