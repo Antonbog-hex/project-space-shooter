@@ -63,8 +63,7 @@ def simpel_planet_spawn(pos,vel= None):
     vel = vel or pygame.Vector2(random.uniform(-200, 200),random.uniform(-200, 200))
     density = 2.5
     p = Planet(pos,vel,random_planet_type(),density,size=random.uniform(1,1.5))
-    g.active_object.add(p)
-    g.planets.add(p)     
+    return p     
 def random_planet_type():
     return random.choice(['icy','desert','earth','ocean','tropical'])
 def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2 = None, separation=None):
@@ -92,10 +91,7 @@ def prefab_binary_planet(pos, density1=None, size1=None, density2 = None , size2
     p1 = Planet(pos1, (0, -v1), random_planet_type(), density1, size=size1)
     p2 = Planet(pos2, (0, v2), random_planet_type(), density2, size=size2)
     
-    g.active_object.add(p1)
-    g.active_object.add(p2)
-    g.planets.add(p1)
-    g.planets.add(p2)
+
     return p1, p2
 
 def spawn_in_orbit(center_pos, anchor_mass, r, angle, style, density, size):
@@ -103,13 +99,9 @@ def spawn_in_orbit(center_pos, anchor_mass, r, angle, style, density, size):
     offset = pygame.Vector2(r, 0).rotate(angle)
     vel = pygame.Vector2(v, 0).rotate(angle + 90)
     planet = Planet(center_pos + offset, vel, style, density, size=size)
-    g.active_object.add(planet)
-    g.planets.add(planet)
     return planet
 def prefab_moon_system(pos, moon_count=None):
     central = Planet(pos, (0,0), random_planet_type(), 4.0, size=1.8)
-    g.active_object.add(central)
-    g.planets.add(central)
     moon_count = moon_count or random.randint(1, 4)
     spawned = [central]
     for i in range(moon_count):
@@ -125,14 +117,10 @@ def prefab_asteroid_field(pos, count=None):
         offset = pygame.Vector2(random.uniform(-800, 800), random.uniform(-800, 800))
         vel = pygame.Vector2(random.uniform(-80, 80),   random.uniform(-80, 80))
         asteroid = Planet(pos + offset, vel, 'moon', random.uniform(2, 5), size=random.uniform(0.05, 0.2))
-        g.active_object.add(asteroid)
-        g.planets.add(asteroid)
         spawned.append(asteroid)
     return spawned
 def prefab_black_hole(pos):
     bh = Planet(pos, (0, 0), 'black_hole', density=50, size=0.6)
-    g.active_object.add(bh)
-    g.planets.add(bh)
     spawned = [bh]
     ring_count = random.randint(4, 8)
     for i in range(ring_count):
@@ -149,9 +137,6 @@ def prefab_triple_star(pos):
     return p1, p2, p3
 def prefab_ringed_planet(pos):
     central = Planet(pos, (0, 0), random_planet_type(), density=3.5, size=2.0)
-    g.active_object.add(central)
-    g.planets.add(central)
-    
     spawned = [central]
     ring_count = random.randint(10, 18)
     for i in range(ring_count):
@@ -161,8 +146,6 @@ def prefab_ringed_planet(pos):
     return spawned
 def prefab_satellite_network(pos):
     central = Planet(pos, (0, 0), random_planet_type(), density=3.5, size=1.5)
-    g.active_object.add(central)
-    g.planets.add(central)
     spawned = [central]
     for i in range(random.randint(3, 6)):
         r = random.uniform(350, 900)

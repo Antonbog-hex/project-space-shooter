@@ -49,11 +49,12 @@ class BaseBullet(PhysicsObject, VisualObject):
                     self.kys()
                 elif obj._is_target:
                     # Doelobject en kogel worden beide verwijderd
+                    # targets are currently unused
                     obj.kys()
                     self.kys()
                 elif obj._is_enemy:
                     obj.take_damage(self.__class__.damage)
-                    # Bijhouden of de speler de vijand heeft geraakt (voor score/drops)
+                    # Bijhouden of de speler de vijand heeft geraakt (voor score)
                     if self.source == g.player: 
                         obj.hit_by_player = True
                     self.kys()
@@ -86,9 +87,9 @@ class RocketBullet(BaseBullet,RotatingObject):
     lifetime = 900
     radius = 5
     texture = None
-    explosion_duration = 45  # Hoe lang de explosie-animatie duurt in frames
+    explosion_duration = 45  # Hoe lang de explosie duurt in frames
     mass = 25
-    snap_cutoff = 0.5               # Hoek (radialen) waarbinnen de raket als "gericht" beschouwd wordt
+    snap_cutoff = 0.5               # Hoek (radialen) waarbinnen turn_to direct corrigeert
     to_moment_amplifier = 0.1       # Hoe sterk de raket bijstuurt
     moment_dampener = 0.05          # Demping om oscillatie te voorkomen
     perp_correction_cutoff = 15     # Maximale zijdelingse afwijking vóór correctie
@@ -126,7 +127,7 @@ class RocketBullet(BaseBullet,RotatingObject):
         super().kys()
 
     def update(self):
-        # Werk de oriëntatie (hoek) bij op basis van de huidige koers
+        # Werk de oriëntatie (normale vector) bij op basis van de huidige koers
         Spaceship._orientation_update(self)
         # Stuur de raket naar het doel
         BaseEnemy.navigate_to_point(self, self.target.pos)

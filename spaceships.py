@@ -104,7 +104,6 @@ class Spaceship(PhysicsObject,RotatingObject,VisualObject):
         # Regenereer het schild als het nog niet vol is
         if self.shield >= min(self.__class__.max_shield, self.hp):
             self.shield_animation(60)
-            print('test')
             self.shield_ticker = max(self.shield_ticker , 300)
             return
         else:
